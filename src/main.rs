@@ -1,5 +1,8 @@
 mod chunk;
-use chunk::{Chunk, OpCode, Disassembler};
+mod disassembler;
+
+use chunk::{Chunk, OpCode};
+use disassembler::Disassembler;
 
 fn main() {
     let mut chunk = Chunk::new();
@@ -10,6 +13,6 @@ fn main() {
 
     chunk.write(OpCode::Return as u8, 123);
 
-    let disassembler = Disassembler::new(chunk);
+    let disassembler = Disassembler::new(&chunk);
     disassembler.disassemble("test chunk");
 }
