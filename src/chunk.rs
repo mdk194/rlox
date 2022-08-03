@@ -5,9 +5,14 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 pub enum OpCode {
     Return,
     Constant,
+    Add,
+    Substract,
+    Multiply,
+    Divide,
+    Negate,
 }
 
-type Value = f64;
+pub type Value = f64;
 
 #[derive(Debug, Clone)]
 pub struct Chunk {
@@ -36,4 +41,3 @@ impl Chunk {
         self.constants.len() - 1
     }
 }
-

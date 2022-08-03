@@ -4,11 +4,12 @@ pub struct Disassembler<'a> {
     chunk: &'a Chunk,
 }
 
-impl <'a> Disassembler<'a> {
+impl<'a> Disassembler<'a> {
     pub fn new(chunk: &'a Chunk) -> Self {
         Disassembler { chunk }
     }
 
+    #[allow(dead_code)]
     pub fn disassemble(&self, name: &str) {
         println!("== {} ==", name);
         let mut offset = 0;
@@ -31,6 +32,11 @@ impl <'a> Disassembler<'a> {
         match instruction {
             OpCode::Return => self.simple_instruction("OP_RETURN", offset),
             OpCode::Constant => self.constant_instruction("OP_CONSTANT", offset),
+            OpCode::Add => self.simple_instruction("OP_ADD", offset),
+            OpCode::Substract => self.simple_instruction("OP_SUBSTRACT", offset),
+            OpCode::Multiply => self.simple_instruction("OP_MULTIPLY", offset),
+            OpCode::Divide => self.simple_instruction("OP_DIVIDE", offset),
+            OpCode::Negate => self.simple_instruction("OP_NEGATE", offset),
         }
     }
 
