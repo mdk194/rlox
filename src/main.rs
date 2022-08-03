@@ -1,13 +1,15 @@
 mod chunk;
+use chunk::{Chunk, OpCode, Disassembler};
 
 fn main() {
-    let mut chunk = chunk::Chunk::new();
+    let mut chunk = Chunk::new();
 
     let i = chunk.add_constant(1.2);
-    chunk.write(chunk::OpCode::Constant(i), 123);
+    chunk.write(OpCode::Constant as u8, 123);
+    chunk.write(i as u8, 123);
 
-    chunk.write(chunk::OpCode::Return, 123);
+    chunk.write(OpCode::Return as u8, 123);
 
-    let disassembler = chunk::Disassembler::new(chunk);
+    let disassembler = Disassembler::new(chunk);
     disassembler.disassemble("test chunk");
 }

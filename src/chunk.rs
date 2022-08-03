@@ -1,14 +1,17 @@
-#[derive(Debug, Clone, Copy)]
+use num_enum::{IntoPrimitive, TryFromPrimitive};
+
+#[derive(Debug, Clone, Copy, IntoPrimitive, TryFromPrimitive)]
+#[repr(u8)]
 pub enum OpCode {
     Return,
-    Constant(usize),
+    Constant,
 }
 
 type Value = f64;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct Chunk {
-    pub code: Vec<OpCode>,
+    pub code: Vec<u8>,
     pub constants: Vec<Value>,
     pub lines: Vec<usize>,
 }
@@ -22,8 +25,8 @@ impl Chunk {
         }
     }
 
-    pub fn write(&mut self, op: OpCode, line_number: usize) -> usize {
-        self.code.push(op);
+    pub fn write(&mut self, byte: u8, line_number: usize) -> usize {
+        self.code.push(byte);
         self.lines.push(line_number);
         self.code.len() - 1
     }
@@ -45,27 +48,37 @@ impl Disassembler {
 
     pub fn disassemble(&self, name: &str) {
         println!("== {} ==", name);
-        for (offset, op) in self.chunk.code.iter().enumerate() {
-            self.instruction(op, offset);
+        let mut offset = 0;
+        while offset < self.chunk.code.len() {
+            offset = self.instruction(offset)
         }
     }
 
-    pub fn instruction(&self, op: &OpCode, offset: usize) {
+    pub fn instruction(&self, offset: usize) -> usize {
         print!("{:04} ", offset);
+
+        let instruction = OpCode::try_from(self.chunk.code[offset]).unwrap();
         let line = self.chunk.lines[offset];
+
         if offset > 0 && line == self.chunk.lines[offset - 1] {
-            print!("    | ");
+            print!("   | ");
         } else {
             print!("{:4} ", line);
         }
-        match op {
-            OpCode::Return => println!("OP_RETURN"),
-            OpCode::Constant(index) => self.constant_instruction("OP_CONSTANT", *index),
+        match instruction {
+            OpCode::Return => self.simple_instruction("OP_RETURN", offset),
+            OpCode::Constant => self.constant_instruction("OP_CONSTANT", offset),
         }
     }
 
-    fn constant_instruction(&self, instruction: &str, index: usize) {
-        let value = self.chunk.constants[index];
-        println!("{:<16} {:4} {}", instruction, index, value);
+    fn simple_instruction(&self, name: &str, offset: usize) -> usize {
+        println!("{}", name);
+        offset + 1
+    }
+
+    fn constant_instruction(&self, name: &str, offset: usize) -> usize {
+        let value = self.chunk.constants[offset];
+        println!("{:<16} {:4} '{}'", name, offset, value);
+        offset + 2
     }
 }
