@@ -1,6 +1,3 @@
-use std::iter::Peekable;
-use std::str::CharIndices;
-
 pub struct Token<'a> {
     pub token_type: TokenType,
     pub start: usize,
@@ -12,156 +9,184 @@ pub struct Token<'a> {
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TokenType {
     // Single-character tokens
-    LeftParen, RightParen,
-    LeftBrace, RightBrace,
-    Comma, Dot, Minus, Plus,
-    Semicolon, Slash, Star,
+    LeftParen,
+    RightParen,
+    LeftBrace,
+    RightBrace,
+    Comma,
+    Dot,
+    Minus,
+    Plus,
+    Semicolon,
+    Slash,
+    Star,
 
     // One or two chars tokens
-    Bang, BangEqual,
-    Equal, EqualEqual,
-    Greater, GreaterEqual,
-    Less, LessEqual,
+    Bang,
+    BangEqual,
+    Equal,
+    EqualEqual,
+    Greater,
+    GreaterEqual,
+    Less,
+    LessEqual,
 
     // Literals
-    Identifier, String, Number,
+    Identifier,
+    String,
+    Number,
 
     // Keywords
-    And, Class, Else, False,
-    For, Fun, If, Nil, Or,
-    Print, Return, Super, This,
-    True, Var, While,
+    And,
+    Class,
+    Else,
+    False,
+    For,
+    Fun,
+    If,
+    Nil,
+    Or,
+    Print,
+    Return,
+    Super,
+    This,
+    True,
+    Var,
+    While,
 
+    Error,
     Eof,
-    ErrorUnexpectedCharacter,
-    ErrorUnterminatedString,
 }
 
 pub struct Scanner<'src> {
     source: &'src str,
-    chars: Peekable<CharIndices<'src>>,
     start: usize,
     current: usize,
     line: usize,
 }
 
-fn is_alpha(c: char) -> bool {
-    c == '_' || c.is_ascii_alphabetic()
+fn is_digit(c: u8) -> bool {
+    c.is_ascii_digit()
+}
+
+fn is_alpha(c: u8) -> bool {
+    c == b'_' || c.is_ascii_alphabetic()
 }
 
 impl<'src> Scanner<'src> {
     pub fn new(source: &'src str) -> Self {
-        let chars = source.char_indices().peekable();
-        Scanner { source, chars, start: 0, current: 0, line: 1 }
+        Scanner {
+            source,
+            start: 0,
+            current: 0,
+            line: 1,
+        }
     }
 
-    fn advance(&mut self) -> Option<char> {
+    fn is_eof(&self) -> bool {
+        self.current == self.source.len()
+    }
+
+    fn lexeme(&self) -> &'src str {
+        &self.source[self.start..self.current]
+    }
+
+    fn peek(&self) -> u8 {
+        if self.is_eof() {
+            0
+        } else {
+            self.source.as_bytes()[self.current]
+        }
+    }
+
+    fn peek_next(&self) -> u8 {
+        if self.current > self.source.len() - 2 {
+            b'\0'
+        } else {
+            self.source.as_bytes()[self.current + 1]
+        }
+    }
+
+    fn advance(&mut self) -> u8 {
+        let c = self.peek();
         self.current += 1;
-        self.chars.next().map(|(_, c)| c)
+        c
     }
 
     fn make_token(&self, t: TokenType) -> Token {
-        let lexeme = if t == TokenType::Eof {
-            ""
-        } else {
-            &self.source[self.start..self.current]
-        };
-
         Token {
             token_type: t,
             start: self.start,
             length: self.current - self.start,
-            lexeme,
-            line: self.line
+            lexeme: self.lexeme(),
+            line: self.line,
         }
     }
 
-    fn match_next_char(&mut self, expected: char) -> bool {
-        match self.chars.peek() {
-            None => false,
-            Some((_, c)) => {
-                if *c == expected {
-                    let _ = self.advance();
-                    return true;
-                }
-                false
-            }
+    fn error_token(&self, message: &'static str) -> Token {
+        Token {
+            token_type: TokenType::Error,
+            start: self.start,
+            length: self.current - self.start,
+            lexeme: message,
+            line: self.line,
         }
     }
 
-    fn ternary_match(&mut self, c: char, m: TokenType, u: TokenType) -> Token {
-        if self.match_next_char(c) {
-            self.make_token(m)
+    fn match_peek(&mut self, expected: u8) -> bool {
+        if self.is_eof() || self.peek() != expected {
+            false
         } else {
-            self.make_token(u)
+            self.current += 1;
+            true
         }
     }
 
-    fn skip_white_space(&mut self) {
-        loop {
-            match self.chars.peek() {
-                Some((_, ' ')) | Some((_, '\r')) | Some((_, '\t')) => {
+    fn skip_whitespace(&mut self) {
+        while !self.is_eof() {
+            match self.peek() {
+                b' ' | b'\r' | b'\t' => {
                     self.advance();
                 }
-                Some((_, '\n')) => {
+                b'\n' => {
                     self.line += 1;
                     self.advance();
                 }
-                Some((_, '/')) => {
-                    match self.source.get(self.current..(self.current + 2)) {
-                        Some("//") => {
-                            while let Some((_, c)) = self.chars.peek() {
-                                if *c == '\n' {
-                                    break;
-                                }
-                                self.advance();
-                            }
-                        }
-                        _ => return,
+                b'/' if self.peek_next() == b'/' => {
+                    while self.peek() != b'\n' && !self.is_eof() {
+                        self.advance();
                     }
                 }
                 _ => return,
-            };
+            }
         }
     }
 
     fn string(&mut self) -> Token {
-        loop {
-            match self.chars.peek() {
-                Some((_, '"')) => {
-                    self.advance();
-                    return self.make_token(TokenType::String);
-                }
-                Some((_, c)) => {
-                    if *c == '\n' {
-                        self.line += 1;
-                    }
-                    self.advance();
-                }
-                None => return self.make_token(TokenType::ErrorUnterminatedString),
+        while self.peek() != b'"' && !self.is_eof() {
+            if self.peek() == b'\n' {
+                self.line += 1;
             }
-        }
-    }
-
-    fn advance_number(&mut self) {
-        while match self.chars.peek() {
-            Some((_, c)) => c.is_ascii_digit(),
-            None => false,
-        } {
             self.advance();
+        }
+
+        if self.is_eof() {
+            self.error_token("Unterminated string.")
+        } else {
+            self.advance();
+            self.make_token(TokenType::String)
         }
     }
 
     fn number(&mut self) -> Token {
-        self.advance_number();
+        while is_digit(self.peek()) {
+            self.advance();
+        }
 
-        let mut chars = self.chars.clone();
-        if let Some((_, '.')) = chars.next() {
-            if let Some((_, c)) = chars.next() {
-                if c.is_ascii_digit() {
-                    self.advance(); // consume the "."
-                    self.advance_number();
-                }
+        if self.peek() == b'.' && is_digit(self.peek_next()) {
+            self.advance(); // consume the "."
+            while is_digit(self.peek()) {
+                self.advance();
             }
         }
 
@@ -169,66 +194,72 @@ impl<'src> Scanner<'src> {
     }
 
     fn identifier(&mut self) -> Token {
-        while match self.chars.peek() {
-            Some((_, c)) => c.is_ascii_digit() || is_alpha(*c),
-            None => false,
-        } {
+        while is_alpha(self.peek()) || is_digit(self.peek()) {
             self.advance();
         }
+        self.make_token(self.identifier_type())
+    }
 
-        let word = &self.source[self.start..self.current];
-        match word {
-            "and" => self.make_token(TokenType::And),
-            "class" => self.make_token(TokenType::Class),
-            "else" => self.make_token(TokenType::Else),
-            "if" => self.make_token(TokenType::If),
-            "nil" => self.make_token(TokenType::Nil),
-            "or" => self.make_token(TokenType::Or),
-            "print" => self.make_token(TokenType::Print),
-            "return" => self.make_token(TokenType::Return),
-            "super" => self.make_token(TokenType::Super),
-            "var" => self.make_token(TokenType::Var),
-            "while" => self.make_token(TokenType::While),
-            "false" => self.make_token(TokenType::False),
-            "for" => self.make_token(TokenType::For),
-            "fun" => self.make_token(TokenType::Fun),
-            "this" => self.make_token(TokenType::This),
-            "true" => self.make_token(TokenType::True),
-            _ => self.make_token(TokenType::Identifier),
+    fn identifier_type(&self) -> TokenType {
+        match self.lexeme() {
+            "and" => TokenType::And,
+            "class" => TokenType::Class,
+            "else" => TokenType::Else,
+            "if" => TokenType::If,
+            "nil" => TokenType::Nil,
+            "or" => TokenType::Or,
+            "print" => TokenType::Print,
+            "return" => TokenType::Return,
+            "super" => TokenType::Super,
+            "var" => TokenType::Var,
+            "while" => TokenType::While,
+            "false" => TokenType::False,
+            "for" => TokenType::For,
+            "fun" => TokenType::Fun,
+            "this" => TokenType::This,
+            "true" => TokenType::True,
+            _ => TokenType::Identifier,
         }
     }
 
     pub fn scan_token(&mut self) -> Token {
-        self.skip_white_space();
+        self.skip_whitespace();
         self.start = self.current;
 
+        if self.is_eof() {
+            return self.make_token(TokenType::Eof);
+        }
+
         match self.advance() {
-            Some(c) => match c {
-                _ if c.is_ascii_digit() => self.number(),
-                _ if is_alpha(c) => self.identifier(),
+            c if is_digit(c) => self.number(),
+            c if is_alpha(c) => self.identifier(),
+            b'(' => self.make_token(TokenType::LeftParen),
+            b')' => self.make_token(TokenType::RightParen),
+            b'{' => self.make_token(TokenType::LeftBrace),
+            b'}' => self.make_token(TokenType::RightBrace),
+            b';' => self.make_token(TokenType::Semicolon),
+            b',' => self.make_token(TokenType::Comma),
+            b'.' => self.make_token(TokenType::Dot),
+            b'-' => self.make_token(TokenType::Minus),
+            b'+' => self.make_token(TokenType::Plus),
+            b'/' => self.make_token(TokenType::Slash),
+            b'*' => self.make_token(TokenType::Star),
 
-                '(' => self.make_token(TokenType::LeftParen),
-                ')' => self.make_token(TokenType::RightParen),
-                '{' => self.make_token(TokenType::LeftBrace),
-                '}' => self.make_token(TokenType::RightBrace),
-                ';' => self.make_token(TokenType::Semicolon),
-                ',' => self.make_token(TokenType::Comma),
-                '.' => self.make_token(TokenType::Dot),
-                '-' => self.make_token(TokenType::Minus),
-                '+' => self.make_token(TokenType::Plus),
-                '/' => self.make_token(TokenType::Slash),
-                '*' => self.make_token(TokenType::Star),
+            b'!' if self.match_peek(b'=') => self.make_token(TokenType::BangEqual),
+            b'!' => self.make_token(TokenType::Bang),
 
-                '!' => self.ternary_match('=', TokenType::BangEqual, TokenType::Bang),
-                '=' => self.ternary_match('=', TokenType::EqualEqual, TokenType::Equal),
-                '<' => self.ternary_match('=', TokenType::LessEqual, TokenType::Less),
-                '>' => self.ternary_match('=', TokenType::GreaterEqual, TokenType::Greater),
+            b'=' if self.match_peek(b'=') => self.make_token(TokenType::EqualEqual),
+            b'=' => self.make_token(TokenType::Equal),
 
-                '"' => self.string(),
+            b'<' if self.match_peek(b'=') => self.make_token(TokenType::LessEqual),
+            b'<' => self.make_token(TokenType::Less),
 
-                _ => self.make_token(TokenType::ErrorUnexpectedCharacter),
-            }
-            None => self.make_token(TokenType::Eof),
+            b'>' if self.match_peek(b'=') => self.make_token(TokenType::GreaterEqual),
+            b'>' => self.make_token(TokenType::Greater),
+
+            b'"' => self.string(),
+
+            _ => self.error_token("Unexpected character."),
         }
     }
 }

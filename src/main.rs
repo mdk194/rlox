@@ -1,14 +1,14 @@
 mod chunk;
-mod disassembler;
-mod vm;
-mod scanner;
 mod compiler;
+mod disassembler;
+mod scanner;
+mod vm;
 
-use std::io::{BufRead, Write};
+use std::io::{self, Write};
 
 use chunk::{Chunk, OpCode};
 use disassembler::Disassembler;
-use vm::{VM, VMError};
+use vm::{VMError, VM};
 
 fn main() {
     let chunk = Chunk::new();
@@ -22,15 +22,22 @@ fn main() {
         _ => {
             eprintln!("usage: rlox [path]");
             std::process::exit(64);
-        },
+        }
     }
 }
 
 fn repl(vm: &mut VM) {
-    for line in std::io::stdin().lock().lines() {
+    loop {
         print!("> ");
-        std::io::stdout().flush().expect("Failed writing to stdout.");
-        vm.interpret(&line.unwrap()).unwrap_or(());
+        io::stdout().flush().unwrap();
+        let mut line = String::new();
+        io::stdin()
+            .read_line(&mut line)
+            .expect("Failed to read line");
+        if line.is_empty() {
+            break;
+        }
+        vm.interpret(&line).ok();
     }
 }
 

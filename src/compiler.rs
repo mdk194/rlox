@@ -1,6 +1,4 @@
-use crate::{
-    scanner::{Scanner, Token, TokenType},
-};
+use crate::scanner::{Scanner, Token, TokenType};
 
 pub struct Compiler<'src> {
     pub scanner: Scanner<'src>,
@@ -25,11 +23,7 @@ impl<'src> Compiler<'src> {
                 print!("   | ");
             }
 
-            if token.token_type == TokenType::ErrorUnexpectedCharacter {
-                println!("{:2?} pos: {}", token.token_type, token.start);
-            } else {
-                println!("{:2?} '{}'", token.token_type, token.lexeme);
-            }
+            println!("{:2?} '{}'", token.token_type, token.lexeme);
 
             if token.token_type == TokenType::Eof {
                 break;

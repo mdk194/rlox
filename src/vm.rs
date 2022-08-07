@@ -1,4 +1,4 @@
-use crate::{chunk::Value, Chunk, Disassembler, OpCode, compiler::Compiler};
+use crate::{chunk::Value, compiler::Compiler, Chunk, Disassembler, OpCode};
 
 pub struct VM<'a> {
     pub chunk: &'a Chunk,
