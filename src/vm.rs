@@ -1,4 +1,4 @@
-use crate::{chunk::Value, Chunk, Disassembler, OpCode};
+use crate::{chunk::Value, Chunk, Disassembler, OpCode, compiler::Compiler};
 
 pub struct VM<'a> {
     pub chunk: &'a Chunk,
@@ -7,11 +7,11 @@ pub struct VM<'a> {
     stack: Vec<Value>,
 }
 
-// pub enum VMError {
-//     CompileError,
-//     RuntimeError,
-// }
-type VMError = usize;
+pub enum VMError {
+    CompileError,
+    RuntimeError,
+}
+
 pub type InterpretResult = Result<(), VMError>;
 
 impl<'a> VM<'a> {
@@ -22,6 +22,12 @@ impl<'a> VM<'a> {
             disassembler,
             stack: Vec::new(),
         }
+    }
+
+    pub fn interpret(&self, source: &str) -> InterpretResult {
+        let mut c = Compiler::new(source);
+        c.compile();
+        Ok(())
     }
 
     fn read_byte(&mut self) -> u8 {
