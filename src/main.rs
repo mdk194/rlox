@@ -7,13 +7,10 @@ mod vm;
 use std::io::{self, Write};
 
 use chunk::{Chunk, OpCode};
-use disassembler::Disassembler;
 use vm::{VMError, VM};
 
 fn main() {
-    let chunk = Chunk::new();
-    let disassembler = Disassembler::new(&chunk);
-    let mut vm = VM::new(&chunk, Some(&disassembler));
+    let mut vm = VM::new(true);
 
     let args: Vec<String> = std::env::args().collect();
     match args.len() {
