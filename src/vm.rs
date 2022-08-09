@@ -24,10 +24,13 @@ impl<'a> VM<'a> {
         }
     }
 
-    pub fn interpret(&self, source: &str) -> InterpretResult {
+    pub fn interpret(&mut self, source: &str) -> InterpretResult {
         let mut c = Compiler::new(source);
-        c.compile();
-        Ok(())
+        if !c.compile() {
+            return Err(VMError::CompileError);
+        }
+
+        self.run()
     }
 
     fn read_byte(&mut self) -> u8 {

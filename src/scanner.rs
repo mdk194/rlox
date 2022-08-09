@@ -1,12 +1,13 @@
-pub struct Token<'a> {
+#[derive(Clone, Copy, Default)]
+pub struct Token<'src> {
     pub token_type: TokenType,
     pub start: usize,
     pub length: usize,
-    pub lexeme: &'a str,
+    pub lexeme: &'src str,
     pub line: usize,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Default)]
 pub enum TokenType {
     // Single-character tokens
     LeftParen,
@@ -54,6 +55,7 @@ pub enum TokenType {
     Var,
     While,
 
+    #[default]
     Error,
     Eof,
 }
@@ -113,7 +115,7 @@ impl<'src> Scanner<'src> {
         c
     }
 
-    fn make_token(&self, t: TokenType) -> Token {
+    fn make_token(&self, t: TokenType) -> Token<'src> {
         Token {
             token_type: t,
             start: self.start,
@@ -123,7 +125,7 @@ impl<'src> Scanner<'src> {
         }
     }
 
-    fn error_token(&self, message: &'static str) -> Token {
+    fn error_token(&self, message: &'static str) -> Token<'static> {
         Token {
             token_type: TokenType::Error,
             start: self.start,
@@ -162,7 +164,7 @@ impl<'src> Scanner<'src> {
         }
     }
 
-    fn string(&mut self) -> Token {
+    fn string(&mut self) -> Token<'src> {
         while self.peek() != b'"' && !self.is_eof() {
             if self.peek() == b'\n' {
                 self.line += 1;
@@ -178,7 +180,7 @@ impl<'src> Scanner<'src> {
         }
     }
 
-    fn number(&mut self) -> Token {
+    fn number(&mut self) -> Token<'src> {
         while is_digit(self.peek()) {
             self.advance();
         }
@@ -193,7 +195,7 @@ impl<'src> Scanner<'src> {
         self.make_token(TokenType::Number)
     }
 
-    fn identifier(&mut self) -> Token {
+    fn identifier(&mut self) -> Token<'src> {
         while is_alpha(self.peek()) || is_digit(self.peek()) {
             self.advance();
         }
@@ -222,7 +224,7 @@ impl<'src> Scanner<'src> {
         }
     }
 
-    pub fn scan_token(&mut self) -> Token {
+    pub fn scan_token(&mut self) -> Token<'src> {
         self.skip_whitespace();
         self.start = self.current;
 
