@@ -1,4 +1,4 @@
-use crate::{chunk::Value, compiler::Compiler, disassembler::Disassembler, Chunk, OpCode};
+use crate::{compiler::Compiler, disassembler::Disassembler, value::Value, Chunk, OpCode};
 
 pub struct VM {
     pub chunk: Chunk,
@@ -39,12 +39,31 @@ impl VM {
         b
     }
 
+    pub fn peek(&self, distance: usize) -> Option<&Value> {
+        self.stack.get(self.stack.len() - 1 - distance)
+    }
+
+    pub fn runtime_error(&mut self, msg: &str) {
+        println!("{}", msg);
+        let line = self.chunk.lines[self.ip - 1];
+        eprintln!("[line {}] in script", line);
+        self.stack.clear();
+    }
+
     pub fn run(&mut self) -> InterpretResult {
         macro_rules! binary_op {
-            ($op:tt) => {{
+            ($type:ident, $op:tt) => {{
                 let b: Value = self.stack.pop().unwrap();
                 let a: Value = self.stack.pop().unwrap();
-                self.stack.push(a $op b);
+                match (a, b) {
+                    (Value::Number(a), Value::Number(b)) => {
+                        self.stack.push(Value::$type(a $op b));
+                    },
+                    _ => {
+                        self.runtime_error("Operands must be numbers.");
+                        return Err(VMError::RuntimeError);
+                    },
+                }
             }};
         }
 
@@ -70,14 +89,32 @@ impl VM {
                     self.stack.push(c);
                 }
                 OpCode::Negate => {
-                    if let Some(v) = self.stack.pop() {
-                        self.stack.push(-v);
+                    if let Some(&Value::Number(v)) = self.peek(0) {
+                        self.stack.pop();
+                        self.stack.push(Value::Number(-v));
+                    } else {
+                        self.runtime_error("Operand must be a number.");
+                        return Err(VMError::RuntimeError);
                     }
                 }
-                OpCode::Add => binary_op!(+),
-                OpCode::Substract => binary_op!(-),
-                OpCode::Multiply => binary_op!(*),
-                OpCode::Divide => binary_op!(/),
+                OpCode::Add => binary_op!(Number, +),
+                OpCode::Substract => binary_op!(Number, -),
+                OpCode::Multiply => binary_op!(Number, *),
+                OpCode::Divide => binary_op!(Number, /),
+                OpCode::Nil => self.stack.push(Value::Nil),
+                OpCode::True => self.stack.push(Value::Bool(true)),
+                OpCode::False => self.stack.push(Value::Bool(false)),
+                OpCode::Not => {
+                    let v: Value = self.stack.pop().unwrap();
+                    self.stack.push(Value::Bool(v.is_falsey()));
+                }
+                OpCode::Equal => {
+                    let b: Value = self.stack.pop().unwrap();
+                    let a: Value = self.stack.pop().unwrap();
+                    self.stack.push(Value::Bool(a == b));
+                }
+                OpCode::Greater => binary_op!(Bool, >),
+                OpCode::Less => binary_op!(Bool, <),
             }
         }
     }

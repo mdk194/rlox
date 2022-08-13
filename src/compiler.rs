@@ -1,7 +1,8 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
-use crate::chunk::{Chunk, OpCode, Value};
+use crate::chunk::{Chunk, OpCode};
 use crate::scanner::{Scanner, Token, TokenType};
+use crate::value::Value;
 
 pub struct Compiler<'src> {
     rules: Vec<(TokenType, ParseRule<'src>)>,
@@ -57,31 +58,31 @@ impl<'src> Compiler<'src> {
         r(TokenType::Semicolon,    None,                     None,                   Precedence::None);
         r(TokenType::Slash,        None,                     Some(Compiler::binary), Precedence::Factor);
         r(TokenType::Star,         None,                     Some(Compiler::binary), Precedence::Factor);
-        r(TokenType::Bang,         None,                     None,                   Precedence::None);
-        r(TokenType::BangEqual,    None,                     None,                   Precedence::None);
+        r(TokenType::Bang,         Some(Compiler::unary),    None,                   Precedence::None);
+        r(TokenType::BangEqual,    None,                     Some(Compiler::binary), Precedence::Equality);
         r(TokenType::Equal,        None,                     None,                   Precedence::None);
-        r(TokenType::EqualEqual,   None,                     None,                   Precedence::None);
-        r(TokenType::Greater,      None,                     None,                   Precedence::None);
-        r(TokenType::GreaterEqual, None,                     None,                   Precedence::None);
-        r(TokenType::Less,         None,                     None,                   Precedence::None);
-        r(TokenType::LessEqual,    None,                     None,                   Precedence::None);
+        r(TokenType::EqualEqual,   None,                     Some(Compiler::binary), Precedence::Equality);
+        r(TokenType::Greater,      None,                     Some(Compiler::binary), Precedence::Comparison);
+        r(TokenType::GreaterEqual, None,                     Some(Compiler::binary), Precedence::Comparison);
+        r(TokenType::Less,         None,                     Some(Compiler::binary), Precedence::Comparison);
+        r(TokenType::LessEqual,    None,                     Some(Compiler::binary), Precedence::Comparison);
         r(TokenType::Identifier,   None,                     None,                   Precedence::None);
         r(TokenType::String,       None,                     None,                   Precedence::None);
         r(TokenType::Number,       Some(Compiler::number),   None,                   Precedence::None);
         r(TokenType::And,          None,                     None,                   Precedence::None);
         r(TokenType::Class,        None,                     None,                   Precedence::None);
         r(TokenType::Else,         None,                     None,                   Precedence::None);
-        r(TokenType::False,        None,                     None,                   Precedence::None);
+        r(TokenType::False,        Some(Compiler::literal),  None,                   Precedence::None);
         r(TokenType::For,          None,                     None,                   Precedence::None);
         r(TokenType::Fun,          None,                     None,                   Precedence::None);
         r(TokenType::If,           None,                     None,                   Precedence::None);
-        r(TokenType::Nil,          None,                     None,                   Precedence::None);
+        r(TokenType::Nil,          Some(Compiler::literal),  None,                   Precedence::None);
         r(TokenType::Or,           None,                     None,                   Precedence::None);
         r(TokenType::Print,        None,                     None,                   Precedence::None);
         r(TokenType::Return,       None,                     None,                   Precedence::None);
         r(TokenType::Super,        None,                     None,                   Precedence::None);
         r(TokenType::This,         None,                     None,                   Precedence::None);
-        r(TokenType::True,         None,                     None,                   Precedence::None);
+        r(TokenType::True,         Some(Compiler::literal),  None,                   Precedence::None);
         r(TokenType::Var,          None,                     None,                   Precedence::None);
         r(TokenType::While,        None,                     None,                   Precedence::None);
         r(TokenType::Error,        None,                     None,                   Precedence::None);
@@ -168,12 +169,21 @@ impl<'src> Compiler<'src> {
     }
 
     fn number(&mut self) {
-        let value: Value = self
+        let value: f64 = self
             .previous
             .lexeme
             .parse()
             .expect("failed to parse number");
-        self.emit_constant(value);
+        self.emit_constant(Value::Number(value));
+    }
+
+    fn literal(&mut self) {
+        match self.previous.token_type {
+            TokenType::False => self.emit(OpCode::False as u8),
+            TokenType::Nil => self.emit(OpCode::Nil as u8),
+            TokenType::True => self.emit(OpCode::True as u8),
+            _ => (),
+        }
     }
 
     fn emit_constant(&mut self, v: Value) {
@@ -199,8 +209,10 @@ impl<'src> Compiler<'src> {
         // compile the operand.
         self.parse_precedence(Precedence::Unary);
 
-        if op_type == TokenType::Minus {
-            self.emit(OpCode::Negate as u8);
+        match op_type {
+            TokenType::Minus => self.emit(OpCode::Negate as u8),
+            TokenType::Bang => self.emit(OpCode::Not as u8),
+            _ => (),
         }
     }
 
@@ -218,6 +230,12 @@ impl<'src> Compiler<'src> {
         );
 
         match op_type {
+            TokenType::BangEqual => self.emit_bytes(OpCode::Equal as u8, OpCode::Not as u8),
+            TokenType::EqualEqual => self.emit(OpCode::Equal as u8),
+            TokenType::Greater => self.emit(OpCode::Greater as u8),
+            TokenType::GreaterEqual => self.emit_bytes(OpCode::Less as u8, OpCode::Not as u8),
+            TokenType::Less => self.emit(OpCode::Less as u8),
+            TokenType::LessEqual => self.emit_bytes(OpCode::Greater as u8, OpCode::Not as u8),
             TokenType::Plus => self.emit(OpCode::Add as u8),
             TokenType::Minus => self.emit(OpCode::Substract as u8),
             TokenType::Star => self.emit(OpCode::Multiply as u8),

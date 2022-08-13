@@ -2,6 +2,7 @@ mod chunk;
 mod compiler;
 mod disassembler;
 mod scanner;
+mod value;
 mod vm;
 
 use std::io::{self, Write};

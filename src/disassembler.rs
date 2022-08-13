@@ -37,6 +37,13 @@ impl<'a> Disassembler<'a> {
             OpCode::Multiply => self.simple_instruction("OP_MULTIPLY", offset),
             OpCode::Divide => self.simple_instruction("OP_DIVIDE", offset),
             OpCode::Negate => self.simple_instruction("OP_NEGATE", offset),
+            OpCode::Nil => self.simple_instruction("OP_NIL", offset),
+            OpCode::True => self.simple_instruction("OP_TRUE", offset),
+            OpCode::False => self.simple_instruction("OP_FALSE", offset),
+            OpCode::Not => self.simple_instruction("OP_NOT", offset),
+            OpCode::Equal => self.simple_instruction("OP_EQUAL", offset),
+            OpCode::Greater => self.simple_instruction("OP_GREATER", offset),
+            OpCode::Less => self.simple_instruction("OP_LESS", offset),
         }
     }
 

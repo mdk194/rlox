@@ -1,3 +1,4 @@
+use crate::value::Value;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 #[derive(Debug, Clone, Copy, IntoPrimitive, TryFromPrimitive)]
@@ -5,16 +6,21 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 pub enum OpCode {
     Return,
     Constant,
+    Nil,
+    True,
+    False,
+    Equal,
+    Greater,
+    Less,
     Add,
     Substract,
     Multiply,
     Divide,
+    Not,
     Negate,
 }
 
-pub type Value = f64;
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Chunk {
     pub code: Vec<u8>,
     pub constants: Vec<Value>,
