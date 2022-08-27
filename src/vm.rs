@@ -59,8 +59,12 @@ impl VM {
                     (Value::Number(a), Value::Number(b)) => {
                         self.stack.push(Value::$type(a $op b));
                     },
+                    (Value::String(a), Value::String(b)) => {
+                        let r = Value::String(format!("{}{}", a, b));
+                        self.stack.push(r);
+                    },
                     _ => {
-                        self.runtime_error("Operands must be numbers.");
+                        self.runtime_error("Operands must be numbers or strings.");
                         return Err(VMError::RuntimeError);
                     },
                 }
@@ -85,7 +89,7 @@ impl VM {
                 }
                 OpCode::Constant => {
                     let index = self.read_byte();
-                    let c = self.chunk.constants[index as usize];
+                    let c = self.chunk.constants[index as usize].clone();
                     self.stack.push(c);
                 }
                 OpCode::Negate => {

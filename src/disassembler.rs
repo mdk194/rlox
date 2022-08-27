@@ -54,7 +54,7 @@ impl<'a> Disassembler<'a> {
 
     fn constant_instruction(&self, name: &str, offset: usize) -> usize {
         let index = self.chunk.code[offset + 1];
-        let value = self.chunk.constants[index as usize];
+        let value = &self.chunk.constants[index as usize];
         println!("{:<16} {:4} '{}'", name, offset, value);
         offset + 2
     }

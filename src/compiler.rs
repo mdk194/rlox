@@ -67,7 +67,7 @@ impl<'src> Compiler<'src> {
         r(TokenType::Less,         None,                     Some(Compiler::binary), Precedence::Comparison);
         r(TokenType::LessEqual,    None,                     Some(Compiler::binary), Precedence::Comparison);
         r(TokenType::Identifier,   None,                     None,                   Precedence::None);
-        r(TokenType::String,       None,                     None,                   Precedence::None);
+        r(TokenType::String,       Some(Compiler::string),   None,                   Precedence::None);
         r(TokenType::Number,       Some(Compiler::number),   None,                   Precedence::None);
         r(TokenType::And,          None,                     None,                   Precedence::None);
         r(TokenType::Class,        None,                     None,                   Precedence::None);
@@ -201,6 +201,12 @@ impl<'src> Compiler<'src> {
     fn grouping(&mut self) {
         self.expression();
         self.consume(TokenType::RightParen, "Expect ')' after expression.");
+    }
+
+    fn string(&mut self) {
+        let lexeme = self.previous.lexeme;
+        let value = &lexeme[1..(lexeme.len() - 1)];
+        self.emit_constant(Value::String(String::from(value)))
     }
 
     fn unary(&mut self) {

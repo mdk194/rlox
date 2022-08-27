@@ -1,10 +1,11 @@
 use core::fmt;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Bool(bool),
     Nil,
     Number(f64),
+    String(String),
 }
 
 impl fmt::Display for Value {
@@ -13,6 +14,7 @@ impl fmt::Display for Value {
             Value::Nil => write!(f, "nil"),
             Value::Bool(v) => write!(f, "{}", v),
             Value::Number(v) => write!(f, "{}", v),
+            Value::String(v) => write!(f, "{}", v),
         }
     }
 }
@@ -29,6 +31,7 @@ impl PartialEq for Value {
             (Value::Bool(s), Value::Bool(o)) => s == o,
             (Value::Nil, _) => true,
             (Value::Number(s), Value::Number(o)) => s == o,
+            (Value::String(s), Value::String(o)) => s == o,
             _ => false,
         }
     }
