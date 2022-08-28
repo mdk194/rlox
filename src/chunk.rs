@@ -18,6 +18,7 @@ pub enum OpCode {
     Divide,
     Not,
     Negate,
+    Print,
 }
 
 #[derive(Debug)]

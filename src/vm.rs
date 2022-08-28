@@ -1,10 +1,10 @@
+#[allow(unused_imports)]
 use crate::{compiler::Compiler, disassembler::Disassembler, value::Value, Chunk, OpCode};
 
 pub struct VM {
     pub chunk: Chunk,
     ip: usize,
     stack: Vec<Value>,
-    enable_debug: bool,
 }
 
 pub enum VMError {
@@ -15,12 +15,11 @@ pub enum VMError {
 pub type InterpretResult = Result<(), VMError>;
 
 impl VM {
-    pub fn new(enable_debug: bool) -> Self {
+    pub fn new() -> Self {
         VM {
             chunk: Chunk::new(),
             ip: 0,
             stack: Vec::new(),
-            enable_debug,
         }
     }
 
@@ -72,21 +71,18 @@ impl VM {
         }
 
         loop {
-            if self.enable_debug {
+            #[cfg(debug_assertions)]
+            {
                 print!("          ");
                 self.stack.iter().for_each(|v| print!("[ {} ]", v));
                 println!();
                 let d = Disassembler::new(&self.chunk);
                 d.instruction(self.ip);
             }
+
             let op = OpCode::try_from(self.read_byte()).unwrap();
             match op {
-                OpCode::Return => {
-                    if let Some(v) = self.stack.pop() {
-                        println!("{}", v);
-                    }
-                    return Ok(());
-                }
+                OpCode::Return => return Ok(()),
                 OpCode::Constant => {
                     let index = self.read_byte();
                     let c = self.chunk.constants[index as usize].clone();
@@ -119,6 +115,11 @@ impl VM {
                 }
                 OpCode::Greater => binary_op!(Bool, >),
                 OpCode::Less => binary_op!(Bool, <),
+                OpCode::Print => {
+                    if let Some(v) = self.stack.pop() {
+                        println!("{}", v);
+                    }
+                }
             }
         }
     }

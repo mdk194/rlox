@@ -11,7 +11,7 @@ use chunk::{Chunk, OpCode};
 use vm::{VMError, VM};
 
 fn main() {
-    let mut vm = VM::new(true);
+    let mut vm = VM::new();
 
     let args: Vec<String> = std::env::args().collect();
     match args.len() {

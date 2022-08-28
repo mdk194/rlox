@@ -101,8 +101,9 @@ impl<'src> Compiler<'src> {
 
     pub fn compile(&mut self) -> bool {
         self.advance();
-        self.expression();
-        self.consume(TokenType::Eof, "Expect end of expression.");
+        while !self.matches(TokenType::Eof) {
+            self.declaration();
+        }
         self.emit(OpCode::Return as u8);
         !self.has_error
     }
@@ -122,6 +123,34 @@ impl<'src> Compiler<'src> {
 
     fn expression(&mut self) {
         self.parse_precedence(Precedence::Assignment);
+    }
+
+    fn declaration(&mut self) {
+        self.statement();
+    }
+
+    fn statement(&mut self) {
+        if self.matches(TokenType::Print) {
+            self.print_statement();
+        }
+    }
+
+    fn matches(&mut self, t: TokenType) -> bool {
+        if !self.check(t) {
+            return false;
+        }
+        self.advance();
+        true
+    }
+
+    fn print_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after value.");
+        self.emit(OpCode::Print as u8);
+    }
+
+    fn check(&mut self, t: TokenType) -> bool {
+        self.current.token_type == t
     }
 
     fn emit(&mut self, b: u8) {

@@ -1,15 +1,18 @@
+#[allow(unused_imports)]
 use crate::{Chunk, OpCode};
 
+#[allow(dead_code)]
 pub struct Disassembler<'a> {
     chunk: &'a Chunk,
 }
 
+#[allow(dead_code)]
 impl<'a> Disassembler<'a> {
     pub fn new(chunk: &'a Chunk) -> Self {
         Disassembler { chunk }
     }
 
-    #[allow(dead_code)]
+    #[cfg(debug_assertions)]
     pub fn disassemble(&self, name: &str) {
         println!("== {} ==", name);
         let mut offset = 0;
@@ -18,6 +21,7 @@ impl<'a> Disassembler<'a> {
         }
     }
 
+    #[cfg(debug_assertions)]
     pub fn instruction(&self, offset: usize) -> usize {
         print!("{:04} ", offset);
 
@@ -44,6 +48,7 @@ impl<'a> Disassembler<'a> {
             OpCode::Equal => self.simple_instruction("OP_EQUAL", offset),
             OpCode::Greater => self.simple_instruction("OP_GREATER", offset),
             OpCode::Less => self.simple_instruction("OP_LESS", offset),
+            OpCode::Print => self.simple_instruction("OP_PRINT", offset),
         }
     }
 
