@@ -55,6 +55,7 @@ impl<'a, 'i> Disassembler<'a, 'i> {
             OpCode::Pop => self.simple_instruction("OP_POP", offset),
             OpCode::DefineGlobal => self.constant_instruction("OP_DEFINE_GLOBAL", offset),
             OpCode::GetGlobal => self.constant_instruction("OP_GET_GLOBAL", offset),
+            OpCode::SetGlobal => self.constant_instruction("OP_SET_GLOBAL", offset),
         }
     }
 

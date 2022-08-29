@@ -34,7 +34,7 @@ pub enum Precedence {
     Primary    = 10,
 }
 
-type ParseFn<'src, 'i> = fn(&mut Compiler<'src, 'i>) -> ();
+type ParseFn<'src, 'i> = fn(&mut Compiler<'src, 'i>, bool) -> ();
 pub struct ParseRule<'src, 'i> {
     prefix: Option<ParseFn<'src, 'i>>,
     infix: Option<ParseFn<'src, 'i>>,
@@ -140,13 +140,19 @@ impl<'src, 'i> Compiler<'src, 'i> {
         }
     }
 
-    fn variable(&mut self) {
-        self.named_variable(self.previous);
+    fn variable(&mut self, can_assign: bool) {
+        self.named_variable(self.previous, can_assign);
     }
 
-    fn named_variable(&mut self, t: Token) {
+    fn named_variable(&mut self, t: Token, can_assign: bool) {
         let arg = self.identifier_constant(t);
-        self.emit_bytes(OpCode::GetGlobal as u8, arg);
+
+        if can_assign && self.matches(TokenType::Equal) {
+            self.expression();
+            self.emit_bytes(OpCode::SetGlobal as u8, arg);
+        } else {
+            self.emit_bytes(OpCode::GetGlobal as u8, arg);
+        }
     }
 
     fn var_declaration(&mut self) {
@@ -280,7 +286,7 @@ impl<'src, 'i> Compiler<'src, 'i> {
         self.has_error = true;
     }
 
-    fn number(&mut self) {
+    fn number(&mut self, _can_assign: bool) {
         let value: f64 = self
             .previous
             .lexeme
@@ -289,7 +295,7 @@ impl<'src, 'i> Compiler<'src, 'i> {
         self.emit_constant(Value::Number(value));
     }
 
-    fn literal(&mut self) {
+    fn literal(&mut self, _can_assign: bool) {
         match self.previous.token_type {
             TokenType::False => self.emit(OpCode::False as u8),
             TokenType::Nil => self.emit(OpCode::Nil as u8),
@@ -305,29 +311,28 @@ impl<'src, 'i> Compiler<'src, 'i> {
 
     fn make_constant(&mut self, v: Value) -> u8 {
         let index = self.chunk.add_constant(v);
-        let index = match u8::try_from(index) {
+        match u8::try_from(index) {
             Ok(i) => i,
             Err(_) => {
                 self.error("Too many constants in one chunk.");
                 0
             }
-        };
-        index
+        }
     }
 
-    fn grouping(&mut self) {
+    fn grouping(&mut self, _can_assign: bool) {
         self.expression();
         self.consume(TokenType::RightParen, "Expect ')' after expression.");
     }
 
-    fn string(&mut self) {
+    fn string(&mut self, _can_assign: bool) {
         let lexeme = self.previous.lexeme;
         let value = &lexeme[1..(lexeme.len() - 1)];
         let istring = self.strings.intern(value);
         self.emit_constant(Value::String(istring))
     }
 
-    fn unary(&mut self) {
+    fn unary(&mut self, _can_assign: bool) {
         let op_type = self.previous.token_type;
 
         // compile the operand.
@@ -344,7 +349,7 @@ impl<'src, 'i> Compiler<'src, 'i> {
         &self.rules[ttype as usize].1
     }
 
-    fn binary(&mut self) {
+    fn binary(&mut self, _can_assign: bool) {
         let op_type = self.previous.token_type;
         let rule = self.get_rule(op_type);
         let p: u8 = rule.precedence.into();
@@ -371,18 +376,25 @@ impl<'src, 'i> Compiler<'src, 'i> {
     fn parse_precedence(&mut self, p: Precedence) {
         self.advance();
 
-        if let Some(prefix_rule) = self.get_rule(self.previous.token_type).prefix {
-            prefix_rule(self);
-        } else {
-            self.error("Expect expression.");
-            return;
-        }
+        let prefix_rule = match self.get_rule(self.previous.token_type).prefix {
+            Some(r) => r,
+            None => {
+                self.error("Expect expression.");
+                return;
+            }
+        };
+
+        let can_assign = p <= Precedence::Assignment;
+        prefix_rule(self, can_assign);
 
         while p <= self.get_rule(self.current.token_type).precedence {
             self.advance();
-            if let Some(infix_rule) = self.get_rule(self.previous.token_type).infix {
-                infix_rule(self);
-            }
+            let infix_rule = self.get_rule(self.previous.token_type).infix.unwrap();
+            infix_rule(self, can_assign);
+        }
+
+        if can_assign && self.matches(TokenType::Equal) {
+            self.error("Invalid assignment target.");
         }
     }
 }

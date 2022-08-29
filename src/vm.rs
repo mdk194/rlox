@@ -52,7 +52,7 @@ impl<'src, 'i> VM<'i> {
     }
 
     pub fn runtime_error(&mut self, msg: &str) {
-        println!("{}", msg);
+        eprintln!("{}", msg);
         let line = self.chunk.lines[self.ip - 1];
         eprintln!("[line {}] in script", line);
         self.stack.clear();
@@ -147,15 +147,27 @@ impl<'src, 'i> VM<'i> {
                 }
                 OpCode::GetGlobal => {
                     let index = self.read_byte();
-                    let index = self.chunk.read_string(index);
-                    match self.globals.get(&index) {
+                    let name = self.chunk.read_string(index);
+                    match self.globals.get(&name) {
                         Some(&value) => self.stack.push(value),
                         None => {
-                            let name = self.strings.lookup(index);
+                            let name = self.strings.lookup(name);
                             let msg = format!("Undefined variable '{}'.", name);
                             self.runtime_error(&msg);
                             return Err(VMError::RuntimeError);
                         }
+                    }
+                }
+                OpCode::SetGlobal => {
+                    let index = self.read_byte();
+                    let name = self.chunk.read_string(index);
+                    let value = self.peek(0).unwrap();
+                    if self.globals.insert(name, *value).is_none() {
+                        self.globals.remove(&name);
+                        let name = self.strings.lookup(name);
+                        let msg = format!("Undefined variable '{}'.", name);
+                        self.runtime_error(&msg);
+                        return Err(VMError::RuntimeError);
                     }
                 }
             }
