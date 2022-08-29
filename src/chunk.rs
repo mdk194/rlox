@@ -1,3 +1,4 @@
+use crate::strings::IString;
 use crate::value::Value;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
@@ -19,6 +20,9 @@ pub enum OpCode {
     Not,
     Negate,
     Print,
+    Pop,
+    DefineGlobal,
+    GetGlobal,
 }
 
 #[derive(Debug)]
@@ -34,6 +38,18 @@ impl Chunk {
             code: Vec::new(),
             constants: Vec::new(),
             lines: Vec::new(),
+        }
+    }
+
+    pub fn read_constant(&self, index: u8) -> Value {
+        self.constants[index as usize]
+    }
+
+    pub fn read_string(&self, index: u8) -> IString {
+        if let Value::String(i) = self.read_constant(index) {
+            i
+        } else {
+            panic!("Not a string.")
         }
     }
 

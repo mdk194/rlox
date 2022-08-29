@@ -1,13 +1,17 @@
-use crate::strings::Interner;
+use rustc_hash::FxHashMap;
+use typed_arena::Arena;
+
+use crate::strings::{IString, Interner};
+
 #[allow(unused_imports)]
 use crate::{compiler::Compiler, disassembler::Disassembler, value::Value, Chunk, OpCode};
-use typed_arena::Arena;
 
 pub struct VM<'i> {
     pub chunk: Chunk,
     ip: usize,
     stack: Vec<Value>,
     strings: Interner<'i>,
+    globals: FxHashMap<IString, Value>,
 }
 
 pub enum VMError {
@@ -24,6 +28,7 @@ impl<'src, 'i> VM<'i> {
             ip: 0,
             stack: Vec::new(),
             strings: Interner::new(arena),
+            globals: FxHashMap::default(),
         }
     }
 
@@ -92,7 +97,7 @@ impl<'src, 'i> VM<'i> {
                 OpCode::Return => return Ok(()),
                 OpCode::Constant => {
                     let index = self.read_byte();
-                    let c = self.chunk.constants[index as usize];
+                    let c = self.chunk.read_constant(index);
                     self.stack.push(c);
                 }
                 OpCode::Negate => {
@@ -128,6 +133,28 @@ impl<'src, 'i> VM<'i> {
                             println!("{}", self.strings.lookup(i));
                         } else {
                             println!("{}", v);
+                        }
+                    }
+                }
+                OpCode::Pop => {
+                    self.stack.pop();
+                }
+                OpCode::DefineGlobal => {
+                    let index = self.read_byte();
+                    let index = self.chunk.read_string(index);
+                    let name = self.stack.pop().unwrap();
+                    self.globals.insert(index, name);
+                }
+                OpCode::GetGlobal => {
+                    let index = self.read_byte();
+                    let index = self.chunk.read_string(index);
+                    match self.globals.get(&index) {
+                        Some(&value) => self.stack.push(value),
+                        None => {
+                            let name = self.strings.lookup(index);
+                            let msg = format!("Undefined variable '{}'.", name);
+                            self.runtime_error(&msg);
+                            return Err(VMError::RuntimeError);
                         }
                     }
                 }

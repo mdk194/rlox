@@ -68,7 +68,7 @@ impl<'src, 'i> Compiler<'src, 'i> {
         r(TokenType::GreaterEqual, None,                     Some(Compiler::binary), Precedence::Comparison);
         r(TokenType::Less,         None,                     Some(Compiler::binary), Precedence::Comparison);
         r(TokenType::LessEqual,    None,                     Some(Compiler::binary), Precedence::Comparison);
-        r(TokenType::Identifier,   None,                     None,                   Precedence::None);
+        r(TokenType::Identifier,   Some(Compiler::variable), None,                   Precedence::None);
         r(TokenType::String,       Some(Compiler::string),   None,                   Precedence::None);
         r(TokenType::Number,       Some(Compiler::number),   None,                   Precedence::None);
         r(TokenType::And,          None,                     None,                   Precedence::None);
@@ -129,13 +129,93 @@ impl<'src, 'i> Compiler<'src, 'i> {
     }
 
     fn declaration(&mut self) {
-        self.statement();
+        if self.matches(TokenType::Var) {
+            self.var_declaration();
+        } else {
+            self.statement();
+        }
+
+        if self.panic_mode {
+            self.synchronize();
+        }
+    }
+
+    fn variable(&mut self) {
+        self.named_variable(self.previous);
+    }
+
+    fn named_variable(&mut self, t: Token) {
+        let arg = self.identifier_constant(t);
+        self.emit_bytes(OpCode::GetGlobal as u8, arg);
+    }
+
+    fn var_declaration(&mut self) {
+        let global = self.parse_variable("Expect variable name.");
+
+        if self.matches(TokenType::Equal) {
+            self.expression();
+        } else {
+            self.emit(OpCode::Nil as u8);
+        }
+
+        self.consume(
+            TokenType::Semicolon,
+            "Expect ';' after variable declaration.",
+        );
+
+        self.define_variable(global);
+    }
+
+    fn parse_variable(&mut self, msg: &str) -> u8 {
+        self.consume(TokenType::Identifier, msg);
+        self.identifier_constant(self.previous)
+    }
+
+    fn identifier_constant(&mut self, t: Token) -> u8 {
+        let identifier = self.strings.intern(t.lexeme);
+        self.make_constant(Value::String(identifier))
+    }
+
+    fn define_variable(&mut self, index: u8) {
+        self.emit_bytes(OpCode::DefineGlobal as u8, index)
+    }
+
+    fn synchronize(&mut self) {
+        self.panic_mode = false;
+
+        while self.current.token_type != TokenType::Eof {
+            if self.previous.token_type == TokenType::Semicolon {
+                return;
+            }
+
+            match self.current.token_type {
+                TokenType::Class
+                | TokenType::Fun
+                | TokenType::Var
+                | TokenType::For
+                | TokenType::If
+                | TokenType::While
+                | TokenType::Print
+                | TokenType::Return => return,
+                _ => (),
+            }
+
+            self.advance();
+        }
     }
 
     fn statement(&mut self) {
         if self.matches(TokenType::Print) {
             self.print_statement();
+        } else {
+            self.expression_statement();
         }
+    }
+
+    fn expression_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after expression.");
+        self.emit(OpCode::Pop as u8);
     }
 
     fn matches(&mut self, t: TokenType) -> bool {
@@ -219,6 +299,11 @@ impl<'src, 'i> Compiler<'src, 'i> {
     }
 
     fn emit_constant(&mut self, v: Value) {
+        let index = self.make_constant(v);
+        self.emit_bytes(OpCode::Constant as u8, index);
+    }
+
+    fn make_constant(&mut self, v: Value) -> u8 {
         let index = self.chunk.add_constant(v);
         let index = match u8::try_from(index) {
             Ok(i) => i,
@@ -227,7 +312,7 @@ impl<'src, 'i> Compiler<'src, 'i> {
                 0
             }
         };
-        self.emit_bytes(OpCode::Constant as u8, index);
+        index
     }
 
     fn grouping(&mut self) {

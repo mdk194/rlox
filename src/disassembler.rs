@@ -52,6 +52,9 @@ impl<'a, 'i> Disassembler<'a, 'i> {
             OpCode::Greater => self.simple_instruction("OP_GREATER", offset),
             OpCode::Less => self.simple_instruction("OP_LESS", offset),
             OpCode::Print => self.simple_instruction("OP_PRINT", offset),
+            OpCode::Pop => self.simple_instruction("OP_POP", offset),
+            OpCode::DefineGlobal => self.constant_instruction("OP_DEFINE_GLOBAL", offset),
+            OpCode::GetGlobal => self.constant_instruction("OP_GET_GLOBAL", offset),
         }
     }
 
