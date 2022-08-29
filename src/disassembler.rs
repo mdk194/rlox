@@ -1,15 +1,18 @@
+use crate::strings::Interner;
+use crate::value::Value;
 #[allow(unused_imports)]
 use crate::{Chunk, OpCode};
 
 #[allow(dead_code)]
-pub struct Disassembler<'a> {
+pub struct Disassembler<'a, 'i> {
     chunk: &'a Chunk,
+    strings: &'a Interner<'i>,
 }
 
 #[allow(dead_code)]
-impl<'a> Disassembler<'a> {
-    pub fn new(chunk: &'a Chunk) -> Self {
-        Disassembler { chunk }
+impl<'a, 'i> Disassembler<'a, 'i> {
+    pub fn new(chunk: &'a Chunk, strings: &'a Interner<'i>) -> Self {
+        Disassembler { chunk, strings }
     }
 
     #[cfg(debug_assertions)]
@@ -60,7 +63,11 @@ impl<'a> Disassembler<'a> {
     fn constant_instruction(&self, name: &str, offset: usize) -> usize {
         let index = self.chunk.code[offset + 1];
         let value = &self.chunk.constants[index as usize];
-        println!("{:<16} {:4} '{}'", name, offset, value);
+        if let Value::String(i) = value {
+            println!("{:<16} {:4} '{}'", name, offset, self.strings.lookup(*i));
+        } else {
+            println!("{:<16} {:4} '{}'", name, offset, value);
+        }
         offset + 2
     }
 }

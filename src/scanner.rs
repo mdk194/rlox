@@ -9,7 +9,7 @@ pub struct Token<'src> {
     pub line: usize,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, IntoPrimitive, TryFromPrimitive, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, IntoPrimitive, TryFromPrimitive, Default)]
 #[repr(u8)]
 #[rustfmt::skip]
 pub enum TokenType {

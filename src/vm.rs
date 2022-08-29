@@ -1,10 +1,13 @@
+use crate::strings::Interner;
 #[allow(unused_imports)]
 use crate::{compiler::Compiler, disassembler::Disassembler, value::Value, Chunk, OpCode};
+use typed_arena::Arena;
 
-pub struct VM {
+pub struct VM<'i> {
     pub chunk: Chunk,
     ip: usize,
     stack: Vec<Value>,
+    strings: Interner<'i>,
 }
 
 pub enum VMError {
@@ -14,17 +17,18 @@ pub enum VMError {
 
 pub type InterpretResult = Result<(), VMError>;
 
-impl VM {
-    pub fn new() -> Self {
+impl<'src, 'i> VM<'i> {
+    pub fn new(arena: &'i Arena<u8>) -> Self {
         VM {
             chunk: Chunk::new(),
             ip: 0,
             stack: Vec::new(),
+            strings: Interner::new(arena),
         }
     }
 
-    pub fn interpret(&mut self, source: &str) -> InterpretResult {
-        let mut c = Compiler::new(source, &mut self.chunk);
+    pub fn interpret(&'src mut self, source: &'src str) -> InterpretResult {
+        let mut c = Compiler::new(source, &mut self.chunk, &mut self.strings);
         if !c.compile() {
             return Err(VMError::CompileError);
         }
@@ -49,7 +53,7 @@ impl VM {
         self.stack.clear();
     }
 
-    pub fn run(&mut self) -> InterpretResult {
+    pub fn run(&'src mut self) -> InterpretResult {
         macro_rules! binary_op {
             ($type:ident, $op:tt) => {{
                 let b: Value = self.stack.pop().unwrap();
@@ -59,8 +63,11 @@ impl VM {
                         self.stack.push(Value::$type(a $op b));
                     },
                     (Value::String(a), Value::String(b)) => {
-                        let r = Value::String(format!("{}{}", a, b));
-                        self.stack.push(r);
+                        let a_str = self.strings.lookup(a);
+                        let b_str = self.strings.lookup(b);
+                        let r = format!("{}{}", a_str, b_str);
+                        let r = self.strings.intern(&r);
+                        self.stack.push(Value::String(r));
                     },
                     _ => {
                         self.runtime_error("Operands must be numbers or strings.");
@@ -76,7 +83,7 @@ impl VM {
                 print!("          ");
                 self.stack.iter().for_each(|v| print!("[ {} ]", v));
                 println!();
-                let d = Disassembler::new(&self.chunk);
+                let d = Disassembler::new(&self.chunk, &self.strings);
                 d.instruction(self.ip);
             }
 
@@ -85,7 +92,7 @@ impl VM {
                 OpCode::Return => return Ok(()),
                 OpCode::Constant => {
                     let index = self.read_byte();
-                    let c = self.chunk.constants[index as usize].clone();
+                    let c = self.chunk.constants[index as usize];
                     self.stack.push(c);
                 }
                 OpCode::Negate => {
@@ -117,7 +124,11 @@ impl VM {
                 OpCode::Less => binary_op!(Bool, <),
                 OpCode::Print => {
                     if let Some(v) = self.stack.pop() {
-                        println!("{}", v);
+                        if let Value::String(i) = v {
+                            println!("{}", self.strings.lookup(i));
+                        } else {
+                            println!("{}", v);
+                        }
                     }
                 }
             }

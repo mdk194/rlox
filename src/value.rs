@@ -1,11 +1,12 @@
+use crate::strings::IString;
 use core::fmt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Value {
     Bool(bool),
     Nil,
     Number(f64),
-    String(String),
+    String(IString),
 }
 
 impl fmt::Display for Value {
@@ -14,7 +15,7 @@ impl fmt::Display for Value {
             Value::Nil => write!(f, "nil"),
             Value::Bool(v) => write!(f, "{}", v),
             Value::Number(v) => write!(f, "{}", v),
-            Value::String(v) => write!(f, "{}", v),
+            Value::String(v) => write!(f, "s:{}", v),
         }
     }
 }

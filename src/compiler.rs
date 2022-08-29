@@ -2,11 +2,13 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use crate::chunk::{Chunk, OpCode};
 use crate::scanner::{Scanner, Token, TokenType};
+use crate::strings::Interner;
 use crate::value::Value;
 
-pub struct Compiler<'src> {
-    rules: Vec<(TokenType, ParseRule<'src>)>,
+pub struct Compiler<'src, 'i> {
+    rules: Vec<(TokenType, ParseRule<'src, 'i>)>,
     chunk: &'src mut Chunk,
+    strings: &'src mut Interner<'i>,
     scanner: Scanner<'src>,
     current: Token<'src>,
     previous: Token<'src>,
@@ -32,16 +34,16 @@ pub enum Precedence {
     Primary    = 10,
 }
 
-type ParseFn<'a> = fn(&mut Compiler<'a>) -> ();
-pub struct ParseRule<'a> {
-    prefix: Option<ParseFn<'a>>,
-    infix: Option<ParseFn<'a>>,
+type ParseFn<'src, 'i> = fn(&mut Compiler<'src, 'i>) -> ();
+pub struct ParseRule<'src, 'i> {
+    prefix: Option<ParseFn<'src, 'i>>,
+    infix: Option<ParseFn<'src, 'i>>,
     precedence: Precedence,
 }
 
-impl<'src> Compiler<'src> {
+impl<'src, 'i> Compiler<'src, 'i> {
     #[rustfmt::skip]
-    pub fn new(source: &'src str, chunk: &'src mut Chunk) -> Self {
+    pub fn new(source: &'src str, chunk: &'src mut Chunk, strings: &'src mut Interner<'i>) -> Self {
         let mut rules = Vec::new();
         let mut r = |t, prefix, infix, precedence| {
             rules.push((t, ParseRule{prefix, infix, precedence}));
@@ -91,6 +93,7 @@ impl<'src> Compiler<'src> {
         Compiler {
             rules,
             chunk,
+            strings,
             scanner: Scanner::new(source),
             current: Token::default(),
             previous: Token::default(),
@@ -235,7 +238,8 @@ impl<'src> Compiler<'src> {
     fn string(&mut self) {
         let lexeme = self.previous.lexeme;
         let value = &lexeme[1..(lexeme.len() - 1)];
-        self.emit_constant(Value::String(String::from(value)))
+        let istring = self.strings.intern(value);
+        self.emit_constant(Value::String(istring))
     }
 
     fn unary(&mut self) {
@@ -251,7 +255,7 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn get_rule(&self, ttype: TokenType) -> &ParseRule<'src> {
+    fn get_rule(&self, ttype: TokenType) -> &ParseRule<'src, 'i> {
         &self.rules[ttype as usize].1
     }
 
@@ -285,7 +289,7 @@ impl<'src> Compiler<'src> {
         if let Some(prefix_rule) = self.get_rule(self.previous.token_type).prefix {
             prefix_rule(self);
         } else {
-            self.error("Expect expressions.");
+            self.error("Expect expression.");
             return;
         }
 

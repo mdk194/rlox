@@ -2,16 +2,19 @@ mod chunk;
 mod compiler;
 mod disassembler;
 mod scanner;
+mod strings;
 mod value;
 mod vm;
 
 use std::io::{self, Write};
 
 use chunk::{Chunk, OpCode};
+use typed_arena::Arena;
 use vm::{VMError, VM};
 
 fn main() {
-    let mut vm = VM::new();
+    let arena = Arena::new();
+    let mut vm = VM::new(&arena);
 
     let args: Vec<String> = std::env::args().collect();
     match args.len() {
