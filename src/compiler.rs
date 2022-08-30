@@ -5,7 +5,7 @@ use crate::scanner::{Scanner, Token, TokenType};
 use crate::strings::Interner;
 use crate::value::Value;
 
-pub struct Compiler<'src, 'i> {
+pub struct Parser<'src, 'i> {
     rules: Vec<(TokenType, ParseRule<'src, 'i>)>,
     chunk: &'src mut Chunk,
     strings: &'src mut Interner<'i>,
@@ -34,14 +34,14 @@ pub enum Precedence {
     Primary    = 10,
 }
 
-type ParseFn<'src, 'i> = fn(&mut Compiler<'src, 'i>, bool) -> ();
+type ParseFn<'src, 'i> = fn(&mut Parser<'src, 'i>, bool) -> ();
 pub struct ParseRule<'src, 'i> {
     prefix: Option<ParseFn<'src, 'i>>,
     infix: Option<ParseFn<'src, 'i>>,
     precedence: Precedence,
 }
 
-impl<'src, 'i> Compiler<'src, 'i> {
+impl<'src, 'i> Parser<'src, 'i> {
     #[rustfmt::skip]
     pub fn new(source: &'src str, chunk: &'src mut Chunk, strings: &'src mut Interner<'i>) -> Self {
         let mut rules = Vec::new();
@@ -49,48 +49,48 @@ impl<'src, 'i> Compiler<'src, 'i> {
             rules.push((t, ParseRule{prefix, infix, precedence}));
         };
 
-        r(TokenType::LeftParen,    Some(Compiler::grouping), None,                   Precedence::None);
-        r(TokenType::RightParen,   None,                     None,                   Precedence::None);
-        r(TokenType::LeftBrace,    None,                     None,                   Precedence::None);
-        r(TokenType::RightBrace,   None,                     None,                   Precedence::None);
-        r(TokenType::Comma,        None,                     None,                   Precedence::None);
-        r(TokenType::Dot,          None,                     None,                   Precedence::None);
-        r(TokenType::Minus,        Some(Compiler::unary),    Some(Compiler::binary), Precedence::Term);
-        r(TokenType::Plus,         None,                     Some(Compiler::binary), Precedence::Term);
-        r(TokenType::Semicolon,    None,                     None,                   Precedence::None);
-        r(TokenType::Slash,        None,                     Some(Compiler::binary), Precedence::Factor);
-        r(TokenType::Star,         None,                     Some(Compiler::binary), Precedence::Factor);
-        r(TokenType::Bang,         Some(Compiler::unary),    None,                   Precedence::None);
-        r(TokenType::BangEqual,    None,                     Some(Compiler::binary), Precedence::Equality);
-        r(TokenType::Equal,        None,                     None,                   Precedence::None);
-        r(TokenType::EqualEqual,   None,                     Some(Compiler::binary), Precedence::Equality);
-        r(TokenType::Greater,      None,                     Some(Compiler::binary), Precedence::Comparison);
-        r(TokenType::GreaterEqual, None,                     Some(Compiler::binary), Precedence::Comparison);
-        r(TokenType::Less,         None,                     Some(Compiler::binary), Precedence::Comparison);
-        r(TokenType::LessEqual,    None,                     Some(Compiler::binary), Precedence::Comparison);
-        r(TokenType::Identifier,   Some(Compiler::variable), None,                   Precedence::None);
-        r(TokenType::String,       Some(Compiler::string),   None,                   Precedence::None);
-        r(TokenType::Number,       Some(Compiler::number),   None,                   Precedence::None);
-        r(TokenType::And,          None,                     None,                   Precedence::None);
-        r(TokenType::Class,        None,                     None,                   Precedence::None);
-        r(TokenType::Else,         None,                     None,                   Precedence::None);
-        r(TokenType::False,        Some(Compiler::literal),  None,                   Precedence::None);
-        r(TokenType::For,          None,                     None,                   Precedence::None);
-        r(TokenType::Fun,          None,                     None,                   Precedence::None);
-        r(TokenType::If,           None,                     None,                   Precedence::None);
-        r(TokenType::Nil,          Some(Compiler::literal),  None,                   Precedence::None);
-        r(TokenType::Or,           None,                     None,                   Precedence::None);
-        r(TokenType::Print,        None,                     None,                   Precedence::None);
-        r(TokenType::Return,       None,                     None,                   Precedence::None);
-        r(TokenType::Super,        None,                     None,                   Precedence::None);
-        r(TokenType::This,         None,                     None,                   Precedence::None);
-        r(TokenType::True,         Some(Compiler::literal),  None,                   Precedence::None);
-        r(TokenType::Var,          None,                     None,                   Precedence::None);
-        r(TokenType::While,        None,                     None,                   Precedence::None);
-        r(TokenType::Error,        None,                     None,                   Precedence::None);
-        r(TokenType::Eof,          None,                     None,                   Precedence::None);
+        r(TokenType::LeftParen,    Some(Parser::grouping), None,                 Precedence::None);
+        r(TokenType::RightParen,   None,                   None,                 Precedence::None);
+        r(TokenType::LeftBrace,    None,                   None,                 Precedence::None);
+        r(TokenType::RightBrace,   None,                   None,                 Precedence::None);
+        r(TokenType::Comma,        None,                   None,                 Precedence::None);
+        r(TokenType::Dot,          None,                   None,                 Precedence::None);
+        r(TokenType::Minus,        Some(Parser::unary),    Some(Parser::binary), Precedence::Term);
+        r(TokenType::Plus,         None,                   Some(Parser::binary), Precedence::Term);
+        r(TokenType::Semicolon,    None,                   None,                 Precedence::None);
+        r(TokenType::Slash,        None,                   Some(Parser::binary), Precedence::Factor);
+        r(TokenType::Star,         None,                   Some(Parser::binary), Precedence::Factor);
+        r(TokenType::Bang,         Some(Parser::unary),    None,                 Precedence::None);
+        r(TokenType::BangEqual,    None,                   Some(Parser::binary), Precedence::Equality);
+        r(TokenType::Equal,        None,                   None,                 Precedence::None);
+        r(TokenType::EqualEqual,   None,                   Some(Parser::binary), Precedence::Equality);
+        r(TokenType::Greater,      None,                   Some(Parser::binary), Precedence::Comparison);
+        r(TokenType::GreaterEqual, None,                   Some(Parser::binary), Precedence::Comparison);
+        r(TokenType::Less,         None,                   Some(Parser::binary), Precedence::Comparison);
+        r(TokenType::LessEqual,    None,                   Some(Parser::binary), Precedence::Comparison);
+        r(TokenType::Identifier,   Some(Parser::variable), None,                 Precedence::None);
+        r(TokenType::String,       Some(Parser::string),   None,                 Precedence::None);
+        r(TokenType::Number,       Some(Parser::number),   None,                 Precedence::None);
+        r(TokenType::And,          None,                   None,                 Precedence::None);
+        r(TokenType::Class,        None,                   None,                 Precedence::None);
+        r(TokenType::Else,         None,                   None,                 Precedence::None);
+        r(TokenType::False,        Some(Parser::literal),  None,                 Precedence::None);
+        r(TokenType::For,          None,                   None,                 Precedence::None);
+        r(TokenType::Fun,          None,                   None,                 Precedence::None);
+        r(TokenType::If,           None,                   None,                 Precedence::None);
+        r(TokenType::Nil,          Some(Parser::literal),  None,                 Precedence::None);
+        r(TokenType::Or,           None,                   None,                 Precedence::None);
+        r(TokenType::Print,        None,                   None,                 Precedence::None);
+        r(TokenType::Return,       None,                   None,                 Precedence::None);
+        r(TokenType::Super,        None,                   None,                 Precedence::None);
+        r(TokenType::This,         None,                   None,                 Precedence::None);
+        r(TokenType::True,         Some(Parser::literal),  None,                 Precedence::None);
+        r(TokenType::Var,          None,                   None,                 Precedence::None);
+        r(TokenType::While,        None,                   None,                 Precedence::None);
+        r(TokenType::Error,        None,                   None,                 Precedence::None);
+        r(TokenType::Eof,          None,                   None,                 Precedence::None);
 
-        Compiler {
+        Parser {
             rules,
             chunk,
             strings,

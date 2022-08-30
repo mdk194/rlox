@@ -4,7 +4,7 @@ use typed_arena::Arena;
 use crate::strings::{IString, Interner};
 
 #[allow(unused_imports)]
-use crate::{compiler::Compiler, disassembler::Disassembler, value::Value, Chunk, OpCode};
+use crate::{compiler::Parser, disassembler::Disassembler, value::Value, Chunk, OpCode};
 
 pub struct VM<'i> {
     pub chunk: Chunk,
@@ -33,8 +33,8 @@ impl<'src, 'i> VM<'i> {
     }
 
     pub fn interpret(&'src mut self, source: &'src str) -> InterpretResult {
-        let mut c = Compiler::new(source, &mut self.chunk, &mut self.strings);
-        if !c.compile() {
+        let mut p = Parser::new(source, &mut self.chunk, &mut self.strings);
+        if !p.compile() {
             return Err(VMError::CompileError);
         }
 
