@@ -98,7 +98,7 @@ impl<'src, 'i> Parser<'src, 'i> {
         r(TokenType::Identifier,   Some(Parser::variable), None,                 Precedence::None);
         r(TokenType::String,       Some(Parser::string),   None,                 Precedence::None);
         r(TokenType::Number,       Some(Parser::number),   None,                 Precedence::None);
-        r(TokenType::And,          None,                   None,                 Precedence::None);
+        r(TokenType::And,          None,                   Some(Parser::and),    Precedence::And);
         r(TokenType::Class,        None,                   None,                 Precedence::None);
         r(TokenType::Else,         None,                   None,                 Precedence::None);
         r(TokenType::False,        Some(Parser::literal),  None,                 Precedence::None);
@@ -106,7 +106,7 @@ impl<'src, 'i> Parser<'src, 'i> {
         r(TokenType::Fun,          None,                   None,                 Precedence::None);
         r(TokenType::If,           None,                   None,                 Precedence::None);
         r(TokenType::Nil,          Some(Parser::literal),  None,                 Precedence::None);
-        r(TokenType::Or,           None,                   None,                 Precedence::None);
+        r(TokenType::Or,           None,                   Some(Parser::or),     Precedence::Or);
         r(TokenType::Print,        None,                   None,                 Precedence::None);
         r(TokenType::Return,       None,                   None,                 Precedence::None);
         r(TokenType::Super,        None,                   None,                 Precedence::None);
@@ -356,6 +356,24 @@ impl<'src, 'i> Parser<'src, 'i> {
         self.chunk.code[offset] = f as u8;
         let s = jump & 0xff;
         self.chunk.code[offset + 1] = s as u8;
+    }
+
+    fn and(&mut self, _can_assign: bool) {
+        let end_jump = self.emit_jump(OpCode::JumpIfFalse as u8);
+        self.emit(OpCode::Pop as u8);
+        self.parse_precedence(Precedence::And);
+        self.patch_jump(end_jump);
+    }
+
+    fn or(&mut self, _can_assign: bool) {
+        let else_jump = self.emit_jump(OpCode::JumpIfFalse as u8);
+        let end_jump = self.emit_jump(OpCode::Jump as u8);
+
+        self.patch_jump(else_jump);
+        self.emit(OpCode::Pop as u8);
+
+        self.parse_precedence(Precedence::Or);
+        self.patch_jump(end_jump);
     }
 
     fn begin_scope(&mut self) {
