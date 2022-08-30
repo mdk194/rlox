@@ -307,6 +307,8 @@ impl<'src, 'i> Parser<'src, 'i> {
     fn statement(&mut self) {
         if self.matches(TokenType::Print) {
             self.print_statement();
+        } else if self.matches(TokenType::If) {
+            self.if_statement();
         } else if self.matches(TokenType::LeftBrace) {
             self.begin_scope();
             self.block();
@@ -314,6 +316,46 @@ impl<'src, 'i> Parser<'src, 'i> {
         } else {
             self.expression_statement();
         }
+    }
+
+    fn if_statement(&mut self) {
+        self.consume(TokenType::LeftParen, "Expect '(' afer 'if'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+
+        let then_jump = self.emit_jump(OpCode::JumpIfFalse as u8);
+        self.emit(OpCode::Pop as u8);
+        self.statement();
+
+        let else_jump = self.emit_jump(OpCode::Jump as u8);
+
+        self.patch_jump(then_jump);
+        self.emit(OpCode::Pop as u8);
+
+        if self.matches(TokenType::Else) {
+            self.statement();
+        }
+        self.patch_jump(else_jump);
+    }
+
+    fn emit_jump(&mut self, b: u8) -> usize {
+        self.emit(b);
+        self.emit(0xff);
+        self.emit(0xff);
+        self.chunk.code.len() - 2
+    }
+
+    fn patch_jump(&mut self, offset: usize) {
+        let jump = self.chunk.code.len() - offset - 2;
+
+        if jump as u16 > std::u16::MAX {
+            self.error("Too much code to jump over.");
+        }
+
+        let f = (jump >> 8) & 0xff;
+        self.chunk.code[offset] = f as u8;
+        let s = jump & 0xff;
+        self.chunk.code[offset + 1] = s as u8;
     }
 
     fn begin_scope(&mut self) {

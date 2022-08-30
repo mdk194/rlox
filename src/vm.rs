@@ -47,6 +47,13 @@ impl<'src, 'i> VM<'i> {
         b
     }
 
+    fn read_short(&mut self) -> u16 {
+        let f = self.chunk.code[self.ip] as u16;
+        let s = self.chunk.code[self.ip + 1] as u16;
+        self.ip += 2;
+        f << 8 | s
+    }
+
     pub fn peek(&self, distance: usize) -> Option<&Value> {
         self.stack.get(self.stack.len() - 1 - distance)
     }
@@ -179,6 +186,16 @@ impl<'src, 'i> VM<'i> {
                     let slot = self.read_byte();
                     let value = *self.peek(0).unwrap();
                     self.stack[slot as usize] = value;
+                }
+                OpCode::JumpIfFalse => {
+                    let offset = self.read_short();
+                    if self.peek(0).unwrap().is_falsey() {
+                        self.ip += offset as usize;
+                    }
+                }
+                OpCode::Jump => {
+                    let offset = self.read_short();
+                    self.ip += offset as usize;
                 }
             }
         }

@@ -58,6 +58,8 @@ impl<'a, 'i> Disassembler<'a, 'i> {
             OpCode::SetGlobal => self.constant_instruction("OP_SET_GLOBAL", offset),
             OpCode::GetLocal => self.byte_instruction("OP_GET_LOCAL", offset),
             OpCode::SetLocal => self.byte_instruction("OP_SET_LOCAL", offset),
+            OpCode::JumpIfFalse => self.jump_instruction("OP_JUMP_IF_FALSE", 1, offset),
+            OpCode::Jump => self.jump_instruction("OP_JUMP", 1, offset),
         }
     }
 
@@ -81,5 +83,19 @@ impl<'a, 'i> Disassembler<'a, 'i> {
         let slot = self.chunk.code[offset + 1];
         println!("{:<16} {:4}", name, slot);
         offset + 2
+    }
+
+    fn jump_instruction(&self, name: &str, sign: i32, offset: usize) -> usize {
+        let f = self.chunk.code[offset + 1] as u16;
+        let s = self.chunk.code[offset + 2] as u16;
+        let jump = f << 8 | s;
+        println!(
+            "{:<16} {:4} -> {}",
+            name,
+            offset,
+            offset as i32 + 3 + sign * jump as i32
+        );
+
+        offset + 3
     }
 }
