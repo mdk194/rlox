@@ -60,6 +60,7 @@ impl<'a, 'i> Disassembler<'a, 'i> {
             OpCode::SetLocal => self.byte_instruction("OP_SET_LOCAL", offset),
             OpCode::JumpIfFalse => self.jump_instruction("OP_JUMP_IF_FALSE", 1, offset),
             OpCode::Jump => self.jump_instruction("OP_JUMP", 1, offset),
+            OpCode::Loop => self.jump_instruction("OP_LOOP", -1, offset),
         }
     }
 

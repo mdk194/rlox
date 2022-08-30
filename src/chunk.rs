@@ -28,6 +28,7 @@ pub enum OpCode {
     SetLocal,
     JumpIfFalse,
     Jump,
+    Loop,
 }
 
 #[derive(Debug)]

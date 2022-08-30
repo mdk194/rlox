@@ -307,8 +307,12 @@ impl<'src, 'i> Parser<'src, 'i> {
     fn statement(&mut self) {
         if self.matches(TokenType::Print) {
             self.print_statement();
+        } else if self.matches(TokenType::For) {
+            self.for_statement();
         } else if self.matches(TokenType::If) {
             self.if_statement();
+        } else if self.matches(TokenType::While) {
+            self.while_statement();
         } else if self.matches(TokenType::LeftBrace) {
             self.begin_scope();
             self.block();
@@ -336,13 +340,6 @@ impl<'src, 'i> Parser<'src, 'i> {
             self.statement();
         }
         self.patch_jump(else_jump);
-    }
-
-    fn emit_jump(&mut self, b: u8) -> usize {
-        self.emit(b);
-        self.emit(0xff);
-        self.emit(0xff);
-        self.chunk.code.len() - 2
     }
 
     fn patch_jump(&mut self, offset: usize) {
@@ -374,6 +371,66 @@ impl<'src, 'i> Parser<'src, 'i> {
 
         self.parse_precedence(Precedence::Or);
         self.patch_jump(end_jump);
+    }
+
+    fn while_statement(&mut self) {
+        let loop_start = self.chunk.code.len();
+        self.consume(TokenType::LeftParen, "Expect '(' after 'while'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+
+        let exit_jump = self.emit_jump(OpCode::JumpIfFalse as u8);
+        self.emit(OpCode::Pop as u8);
+        self.statement();
+        self.emit_loop(loop_start);
+
+        self.patch_jump(exit_jump);
+        self.emit(OpCode::Pop as u8);
+    }
+
+    fn for_statement(&mut self) {
+        self.begin_scope();
+
+        self.consume(TokenType::LeftParen, "Expect '(' after 'for'.");
+        if self.matches(TokenType::Semicolon) {
+            // no initializer.
+        } else if self.matches(TokenType::Var) {
+            self.var_declaration();
+        } else {
+            self.expression_statement();
+        }
+
+        let mut loop_start = self.chunk.code.len();
+        let mut exit_jump = None;
+        if !self.matches(TokenType::Semicolon) {
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expect ';' after loop condition.");
+
+            // jump out of the loop if the condition is false.
+            exit_jump = Some(self.emit_jump(OpCode::JumpIfFalse as u8));
+            self.emit(OpCode::Pop as u8);
+        }
+
+        if !self.matches(TokenType::RightParen) {
+            let body_jump = self.emit_jump(OpCode::Jump as u8);
+            let increment_start = self.chunk.code.len();
+            self.expression();
+            self.emit(OpCode::Pop as u8);
+            self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
+
+            self.emit_loop(loop_start);
+            loop_start = increment_start;
+            self.patch_jump(body_jump);
+        }
+
+        self.statement();
+        self.emit_loop(loop_start);
+        if let Some(j) = exit_jump {
+            self.patch_jump(j);
+            self.emit(OpCode::Pop as u8); // Condition
+        }
+
+        self.end_scope();
     }
 
     fn begin_scope(&mut self) {
@@ -430,6 +487,27 @@ impl<'src, 'i> Parser<'src, 'i> {
     fn emit_bytes(&mut self, b1: u8, b2: u8) {
         self.emit(b1);
         self.emit(b2);
+    }
+
+    fn emit_jump(&mut self, b: u8) -> usize {
+        self.emit(b);
+        self.emit(0xff);
+        self.emit(0xff);
+        self.chunk.code.len() - 2
+    }
+
+    fn emit_loop(&mut self, loop_start: usize) {
+        self.emit(OpCode::Loop as u8);
+
+        let offset = self.chunk.code.len() - loop_start + 2;
+        if offset as u16 > std::u16::MAX {
+            self.error("Loop body too large.");
+        }
+
+        let f = (offset >> 8) & 0xff;
+        let s = offset & 0xff;
+        self.emit(f as u8);
+        self.emit(s as u8);
     }
 
     fn consume(&mut self, ttype: TokenType, msg: &str) {
