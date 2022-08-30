@@ -141,17 +141,17 @@ impl<'src, 'i> VM<'i> {
                 }
                 OpCode::DefineGlobal => {
                     let index = self.read_byte();
-                    let index = self.chunk.read_string(index);
+                    let istring = self.chunk.read_string(index);
                     let name = self.stack.pop().unwrap();
-                    self.globals.insert(index, name);
+                    self.globals.insert(istring, name);
                 }
                 OpCode::GetGlobal => {
                     let index = self.read_byte();
-                    let name = self.chunk.read_string(index);
-                    match self.globals.get(&name) {
+                    let istring = self.chunk.read_string(index);
+                    match self.globals.get(&istring) {
                         Some(&value) => self.stack.push(value),
                         None => {
-                            let name = self.strings.lookup(name);
+                            let name = self.strings.lookup(istring);
                             let msg = format!("Undefined variable '{}'.", name);
                             self.runtime_error(&msg);
                             return Err(VMError::RuntimeError);
@@ -160,15 +160,25 @@ impl<'src, 'i> VM<'i> {
                 }
                 OpCode::SetGlobal => {
                     let index = self.read_byte();
-                    let name = self.chunk.read_string(index);
+                    let istring = self.chunk.read_string(index);
                     let value = self.peek(0).unwrap();
-                    if self.globals.insert(name, *value).is_none() {
-                        self.globals.remove(&name);
-                        let name = self.strings.lookup(name);
+                    if self.globals.insert(istring, *value).is_none() {
+                        self.globals.remove(&istring);
+                        let name = self.strings.lookup(istring);
                         let msg = format!("Undefined variable '{}'.", name);
                         self.runtime_error(&msg);
                         return Err(VMError::RuntimeError);
                     }
+                }
+                OpCode::GetLocal => {
+                    let slot = self.read_byte();
+                    let value = self.stack[slot as usize];
+                    self.stack.push(value);
+                }
+                OpCode::SetLocal => {
+                    let slot = self.read_byte();
+                    let value = *self.peek(0).unwrap();
+                    self.stack[slot as usize] = value;
                 }
             }
         }

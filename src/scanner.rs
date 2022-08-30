@@ -1,6 +1,6 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct Token<'src> {
     pub token_type: TokenType,
     pub start: usize,
