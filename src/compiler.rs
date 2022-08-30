@@ -135,7 +135,7 @@ impl<'src, 'i> Parser<'src, 'i> {
         while !self.matches(TokenType::Eof) {
             self.declaration();
         }
-        self.emit(OpCode::Return as u8);
+        self.emit(OpCode::Return);
         !self.has_error
     }
 
@@ -226,7 +226,7 @@ impl<'src, 'i> Parser<'src, 'i> {
         if self.matches(TokenType::Equal) {
             self.expression();
         } else {
-            self.emit(OpCode::Nil as u8);
+            self.emit(OpCode::Nil);
         }
 
         self.consume(
@@ -328,13 +328,13 @@ impl<'src, 'i> Parser<'src, 'i> {
         self.consume(TokenType::RightParen, "Expect ')' after condition.");
 
         let then_jump = self.emit_jump(OpCode::JumpIfFalse as u8);
-        self.emit(OpCode::Pop as u8);
+        self.emit(OpCode::Pop);
         self.statement();
 
         let else_jump = self.emit_jump(OpCode::Jump as u8);
 
         self.patch_jump(then_jump);
-        self.emit(OpCode::Pop as u8);
+        self.emit(OpCode::Pop);
 
         if self.matches(TokenType::Else) {
             self.statement();
@@ -357,7 +357,7 @@ impl<'src, 'i> Parser<'src, 'i> {
 
     fn and(&mut self, _can_assign: bool) {
         let end_jump = self.emit_jump(OpCode::JumpIfFalse as u8);
-        self.emit(OpCode::Pop as u8);
+        self.emit(OpCode::Pop);
         self.parse_precedence(Precedence::And);
         self.patch_jump(end_jump);
     }
@@ -367,7 +367,7 @@ impl<'src, 'i> Parser<'src, 'i> {
         let end_jump = self.emit_jump(OpCode::Jump as u8);
 
         self.patch_jump(else_jump);
-        self.emit(OpCode::Pop as u8);
+        self.emit(OpCode::Pop);
 
         self.parse_precedence(Precedence::Or);
         self.patch_jump(end_jump);
@@ -380,12 +380,12 @@ impl<'src, 'i> Parser<'src, 'i> {
         self.consume(TokenType::RightParen, "Expect ')' after condition.");
 
         let exit_jump = self.emit_jump(OpCode::JumpIfFalse as u8);
-        self.emit(OpCode::Pop as u8);
+        self.emit(OpCode::Pop);
         self.statement();
         self.emit_loop(loop_start);
 
         self.patch_jump(exit_jump);
-        self.emit(OpCode::Pop as u8);
+        self.emit(OpCode::Pop);
     }
 
     fn for_statement(&mut self) {
@@ -408,14 +408,14 @@ impl<'src, 'i> Parser<'src, 'i> {
 
             // jump out of the loop if the condition is false.
             exit_jump = Some(self.emit_jump(OpCode::JumpIfFalse as u8));
-            self.emit(OpCode::Pop as u8);
+            self.emit(OpCode::Pop);
         }
 
         if !self.matches(TokenType::RightParen) {
             let body_jump = self.emit_jump(OpCode::Jump as u8);
             let increment_start = self.chunk.code.len();
             self.expression();
-            self.emit(OpCode::Pop as u8);
+            self.emit(OpCode::Pop);
             self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
 
             self.emit_loop(loop_start);
@@ -427,7 +427,7 @@ impl<'src, 'i> Parser<'src, 'i> {
         self.emit_loop(loop_start);
         if let Some(j) = exit_jump {
             self.patch_jump(j);
-            self.emit(OpCode::Pop as u8); // Condition
+            self.emit(OpCode::Pop); // Condition
         }
 
         self.end_scope();
@@ -443,7 +443,7 @@ impl<'src, 'i> Parser<'src, 'i> {
         while !self.compiler.locals.is_empty()
             && self.compiler.locals.last().unwrap().depth > self.compiler.scope_depth
         {
-            self.emit(OpCode::Pop as u8);
+            self.emit(OpCode::Pop);
             self.compiler.locals.pop();
         }
     }
@@ -459,7 +459,7 @@ impl<'src, 'i> Parser<'src, 'i> {
     fn expression_statement(&mut self) {
         self.expression();
         self.consume(TokenType::Semicolon, "Expect ';' after expression.");
-        self.emit(OpCode::Pop as u8);
+        self.emit(OpCode::Pop);
     }
 
     fn matches(&mut self, t: TokenType) -> bool {
@@ -473,31 +473,35 @@ impl<'src, 'i> Parser<'src, 'i> {
     fn print_statement(&mut self) {
         self.expression();
         self.consume(TokenType::Semicolon, "Expect ';' after value.");
-        self.emit(OpCode::Print as u8);
+        self.emit(OpCode::Print);
     }
 
     fn check(&mut self, t: TokenType) -> bool {
         self.current.token_type == t
     }
 
-    fn emit(&mut self, b: u8) {
+    fn emit(&mut self, o: OpCode) {
+        self.chunk.write(o as u8, self.previous.line);
+    }
+
+    fn emit_byte(&mut self, b: u8) {
         self.chunk.write(b, self.previous.line);
     }
 
     fn emit_bytes(&mut self, b1: u8, b2: u8) {
-        self.emit(b1);
-        self.emit(b2);
+        self.emit_byte(b1);
+        self.emit_byte(b2);
     }
 
     fn emit_jump(&mut self, b: u8) -> usize {
-        self.emit(b);
-        self.emit(0xff);
-        self.emit(0xff);
+        self.emit_byte(b);
+        self.emit_byte(0xff);
+        self.emit_byte(0xff);
         self.chunk.code.len() - 2
     }
 
     fn emit_loop(&mut self, loop_start: usize) {
-        self.emit(OpCode::Loop as u8);
+        self.emit(OpCode::Loop);
 
         let offset = self.chunk.code.len() - loop_start + 2;
         if offset as u16 > std::u16::MAX {
@@ -506,8 +510,8 @@ impl<'src, 'i> Parser<'src, 'i> {
 
         let f = (offset >> 8) & 0xff;
         let s = offset & 0xff;
-        self.emit(f as u8);
-        self.emit(s as u8);
+        self.emit_byte(f as u8);
+        self.emit_byte(s as u8);
     }
 
     fn consume(&mut self, ttype: TokenType, msg: &str) {
@@ -556,9 +560,9 @@ impl<'src, 'i> Parser<'src, 'i> {
 
     fn literal(&mut self, _can_assign: bool) {
         match self.previous.token_type {
-            TokenType::False => self.emit(OpCode::False as u8),
-            TokenType::Nil => self.emit(OpCode::Nil as u8),
-            TokenType::True => self.emit(OpCode::True as u8),
+            TokenType::False => self.emit(OpCode::False),
+            TokenType::Nil => self.emit(OpCode::Nil),
+            TokenType::True => self.emit(OpCode::True),
             _ => (),
         }
     }
@@ -598,8 +602,8 @@ impl<'src, 'i> Parser<'src, 'i> {
         self.parse_precedence(Precedence::Unary);
 
         match op_type {
-            TokenType::Minus => self.emit(OpCode::Negate as u8),
-            TokenType::Bang => self.emit(OpCode::Not as u8),
+            TokenType::Minus => self.emit(OpCode::Negate),
+            TokenType::Bang => self.emit(OpCode::Not),
             _ => (),
         }
     }
@@ -619,15 +623,15 @@ impl<'src, 'i> Parser<'src, 'i> {
 
         match op_type {
             TokenType::BangEqual => self.emit_bytes(OpCode::Equal as u8, OpCode::Not as u8),
-            TokenType::EqualEqual => self.emit(OpCode::Equal as u8),
-            TokenType::Greater => self.emit(OpCode::Greater as u8),
+            TokenType::EqualEqual => self.emit(OpCode::Equal),
+            TokenType::Greater => self.emit(OpCode::Greater),
             TokenType::GreaterEqual => self.emit_bytes(OpCode::Less as u8, OpCode::Not as u8),
-            TokenType::Less => self.emit(OpCode::Less as u8),
+            TokenType::Less => self.emit(OpCode::Less),
             TokenType::LessEqual => self.emit_bytes(OpCode::Greater as u8, OpCode::Not as u8),
-            TokenType::Plus => self.emit(OpCode::Add as u8),
-            TokenType::Minus => self.emit(OpCode::Substract as u8),
-            TokenType::Star => self.emit(OpCode::Multiply as u8),
-            TokenType::Slash => self.emit(OpCode::Divide as u8),
+            TokenType::Plus => self.emit(OpCode::Add),
+            TokenType::Minus => self.emit(OpCode::Substract),
+            TokenType::Star => self.emit(OpCode::Multiply),
+            TokenType::Slash => self.emit(OpCode::Divide),
             _ => (),
         }
     }
