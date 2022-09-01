@@ -2,7 +2,7 @@ use crate::chunk::Chunk;
 use crate::strings::IString;
 
 #[allow(dead_code)]
-#[derive(Default, PartialEq)]
+#[derive(Default, PartialEq, Eq)]
 pub enum FunctionType {
     Function,
     #[default]

@@ -114,10 +114,7 @@ impl<'src, 'i> VM<'i> {
             match f.name {
                 Some(istring) => {
                     let function_name = self.strings.lookup(istring);
-                    eprintln!(
-                        "[line {}] in {}()",
-                        f.chunk.lines[line], function_name
-                    );
+                    eprintln!("[line {}] in {}()", f.chunk.lines[line], function_name);
                 }
                 None => eprintln!("[line {}] in script", f.chunk.lines[line]),
             };
@@ -137,7 +134,9 @@ impl<'src, 'i> VM<'i> {
         let f = self.functions.lookup(ifunction);
 
         if arg_count != f.arity {
-            self.runtime_error(format!("Expected {} arguments but got {}.", f.arity, arg_count).as_str());
+            self.runtime_error(
+                format!("Expected {} arguments but got {}.", f.arity, arg_count).as_str(),
+            );
             return false;
         } else if self.frames.len() == VM::FRAME_MAX {
             self.runtime_error("Stack overflow.");
@@ -180,7 +179,9 @@ impl<'src, 'i> VM<'i> {
             #[cfg(debug_assertions)]
             {
                 print!("          ");
-                self.stack.iter().for_each(|v| print!("[ {} ]", v));
+                self.stack
+                    .iter()
+                    .for_each(|v| print!("[ {} ]", v.as_string(&self.strings, &self.functions)));
                 println!();
                 let d = Disassembler::new(self.current_chunk(), &self.strings, &self.functions);
                 d.instruction(self.current_frame().ip);
@@ -232,18 +233,7 @@ impl<'src, 'i> VM<'i> {
                 OpCode::Less => binary_op!(Bool, <),
                 OpCode::Print => {
                     if let Some(v) = self.stack.pop() {
-                        match v {
-                            Value::String(i) => {
-                                println!("{}", self.strings.lookup(i));
-                            }
-                            Value::Function(i) => {
-                                let istring = self.functions.lookup(i).name.unwrap();
-                                println!("<fn {}>", self.strings.lookup(istring));
-                            }
-                            _ => {
-                                println!("{}", v);
-                            }
-                        }
+                        println!("{}", v.as_string(&self.strings, &self.functions))
                     }
                 }
                 OpCode::Pop => {

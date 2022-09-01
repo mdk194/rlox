@@ -1,6 +1,5 @@
 use crate::function::Functions;
 use crate::strings::Interner;
-use crate::value::Value;
 
 #[allow(unused_imports)]
 use crate::{Chunk, OpCode};
@@ -80,23 +79,12 @@ impl<'a, 'i> Disassembler<'a, 'i> {
     fn constant_instruction(&self, name: &str, offset: usize) -> usize {
         let index = self.chunk.code[offset + 1];
         let value = &self.chunk.constants[index as usize];
-        match value {
-            Value::String(i) => {
-                println!("{:<16} {:4} '{}'", name, offset, self.strings.lookup(*i));
-            }
-            Value::Function(i) => {
-                let fn_name = self.functions.lookup(*i).name.unwrap();
-                println!(
-                    "{:<16} {:4} '<fn {}>'",
-                    name,
-                    offset,
-                    self.strings.lookup(fn_name)
-                );
-            }
-            _ => {
-                println!("{:<16} {:4} '{}'", name, offset, value);
-            }
-        }
+        println!(
+            "{:<16} {:4} '{}'",
+            name,
+            offset,
+            value.as_string(self.strings, self.functions)
+        );
         offset + 2
     }
 

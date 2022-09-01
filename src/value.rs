@@ -1,6 +1,5 @@
-use crate::function::IFunction;
-use crate::strings::IString;
-use core::fmt;
+use crate::function::{Functions, IFunction};
+use crate::strings::{IString, Interner};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
@@ -11,26 +10,24 @@ pub enum Value {
     Function(IFunction),
 }
 
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Value::Nil => write!(f, "nil"),
-            Value::Bool(v) => write!(f, "{}", v),
-            Value::Number(v) => write!(f, "{}", v),
-            Value::String(v) => write!(f, "<s:{}>", v),
-            Value::Function(v) => {
-                if *v == 0 {
-                    return write!(f, "<script>");
-                }
-                write!(f, "<fn:{}>", v)
-            }
-        }
-    }
-}
-
 impl Value {
     pub fn is_falsey(&self) -> bool {
         matches!(self, Value::Nil | Value::Bool(false))
+    }
+
+    pub fn as_string(&self, strings: &Interner, functions: &Functions) -> String {
+        match self {
+            Value::Nil => "nil".to_owned(),
+            Value::Bool(v) => format!("{}", v),
+            Value::Number(v) => format!("{}", v),
+            Value::String(i) => strings.lookup(*i).to_owned(),
+            Value::Function(i) => {
+                if let Some(fn_name) = functions.lookup(*i).name {
+                    return format!("<fn {}>", strings.lookup(fn_name));
+                }
+                "<script>".to_owned()
+            }
+        }
     }
 }
 
