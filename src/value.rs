@@ -1,3 +1,4 @@
+use crate::function::IFunction;
 use crate::strings::IString;
 use core::fmt;
 
@@ -7,6 +8,7 @@ pub enum Value {
     Nil,
     Number(f64),
     String(IString),
+    Function(IFunction),
 }
 
 impl fmt::Display for Value {
@@ -15,7 +17,8 @@ impl fmt::Display for Value {
             Value::Nil => write!(f, "nil"),
             Value::Bool(v) => write!(f, "{}", v),
             Value::Number(v) => write!(f, "{}", v),
-            Value::String(v) => write!(f, "s:{}", v),
+            Value::String(v) => write!(f, "<s:{}>", v),
+            Value::Function(v) => write!(f, "<fn:{}>", v),
         }
     }
 }

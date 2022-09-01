@@ -1,14 +1,23 @@
 use rustc_hash::FxHashMap;
 use typed_arena::Arena;
 
-use crate::strings::{IString, Interner};
+use crate::{
+    function::{Functions, IFunction},
+    strings::{IString, Interner},
+};
 
 #[allow(unused_imports)]
 use crate::{compiler::Parser, disassembler::Disassembler, value::Value, Chunk, OpCode};
 
-pub struct VM<'i> {
-    pub chunk: Chunk,
+struct CallFrame {
+    ifunction: IFunction,
     ip: usize,
+    slot: usize,
+}
+
+pub struct VM<'i> {
+    frames: Vec<CallFrame>,
+    functions: Functions,
     stack: Vec<Value>,
     strings: Interner<'i>,
     globals: FxHashMap<IString, Value>,
@@ -22,36 +31,78 @@ pub enum VMError {
 pub type InterpretResult = Result<(), VMError>;
 
 impl<'src, 'i> VM<'i> {
+    const FRAME_MAX: usize = 64;
+    const STACK_MAX: usize = VM::FRAME_MAX * (std::u8::MAX as usize + 1);
+
     pub fn new(arena: &'i Arena<u8>) -> Self {
         VM {
-            chunk: Chunk::new(),
-            ip: 0,
-            stack: Vec::new(),
+            frames: Vec::with_capacity(VM::FRAME_MAX),
+            functions: Functions::new(),
+            stack: Vec::with_capacity(VM::STACK_MAX),
             strings: Interner::new(arena),
             globals: FxHashMap::default(),
         }
     }
 
+    fn current_frame(&self) -> &CallFrame {
+        self.frames.last().unwrap()
+    }
+
+    fn current_frame_mut(&mut self) -> &mut CallFrame {
+        self.frames.last_mut().unwrap()
+    }
+
+    fn current_chunk(&self) -> &Chunk {
+        let ifunction = self.current_frame().ifunction;
+        let f = self.functions.lookup(ifunction);
+        &f.chunk
+    }
+
     pub fn interpret(&'src mut self, source: &'src str) -> InterpretResult {
-        let mut p = Parser::new(source, &mut self.chunk, &mut self.strings);
-        if !p.compile() {
-            return Err(VMError::CompileError);
+        let p = Parser::new(source, &mut self.strings);
+
+        match p.compile() {
+            None => return Err(VMError::CompileError),
+            Some(f) => {
+                let ifunction = self.functions.add(f);
+                self.stack.push(Value::Function(ifunction));
+                self.frames.push(CallFrame {
+                    ifunction,
+                    ip: 0,
+                    slot: 0,
+                });
+            }
         }
 
         self.run()
     }
 
     fn read_byte(&mut self) -> u8 {
-        let b = self.chunk.code[self.ip];
-        self.ip += 1;
+        let frame = self.current_frame();
+        let b = self.current_chunk().code[frame.ip];
+        self.current_frame_mut().ip += 1;
         b
     }
 
     fn read_short(&mut self) -> u16 {
-        let f = self.chunk.code[self.ip] as u16;
-        let s = self.chunk.code[self.ip + 1] as u16;
-        self.ip += 2;
+        let frame = self.current_frame();
+        let chunk = self.current_chunk();
+        let f = chunk.code[frame.ip] as u16;
+        let s = chunk.code[frame.ip + 1] as u16;
+        self.current_frame_mut().ip += 2;
         f << 8 | s
+    }
+
+    fn read_constant(&mut self) -> Value {
+        let index = self.read_byte();
+        let chunk = self.current_chunk();
+        chunk.read_constant(index)
+    }
+
+    fn read_string(&mut self) -> IString {
+        let index = self.read_byte();
+        let chunk = self.current_chunk();
+        chunk.read_string(index)
     }
 
     pub fn peek(&self, distance: usize) -> Option<&Value> {
@@ -60,7 +111,9 @@ impl<'src, 'i> VM<'i> {
 
     pub fn runtime_error(&mut self, msg: &str) {
         eprintln!("{}", msg);
-        let line = self.chunk.lines[self.ip - 1];
+        let frame = self.current_frame();
+        let chunk = self.current_chunk();
+        let line = chunk.lines[frame.ip - 1];
         eprintln!("[line {}] in script", line);
         self.stack.clear();
     }
@@ -95,16 +148,15 @@ impl<'src, 'i> VM<'i> {
                 print!("          ");
                 self.stack.iter().for_each(|v| print!("[ {} ]", v));
                 println!();
-                let d = Disassembler::new(&self.chunk, &self.strings);
-                d.instruction(self.ip);
+                let d = Disassembler::new(self.current_chunk(), &self.strings);
+                d.instruction(self.current_frame().ip);
             }
 
             let op = OpCode::try_from(self.read_byte()).unwrap();
             match op {
                 OpCode::Return => return Ok(()),
                 OpCode::Constant => {
-                    let index = self.read_byte();
-                    let c = self.chunk.read_constant(index);
+                    let c = self.read_constant();
                     self.stack.push(c);
                 }
                 OpCode::Negate => {
@@ -147,14 +199,12 @@ impl<'src, 'i> VM<'i> {
                     self.stack.pop();
                 }
                 OpCode::DefineGlobal => {
-                    let index = self.read_byte();
-                    let istring = self.chunk.read_string(index);
+                    let istring = self.read_string();
                     let name = self.stack.pop().unwrap();
                     self.globals.insert(istring, name);
                 }
                 OpCode::GetGlobal => {
-                    let index = self.read_byte();
-                    let istring = self.chunk.read_string(index);
+                    let istring = self.read_string();
                     match self.globals.get(&istring) {
                         Some(&value) => self.stack.push(value),
                         None => {
@@ -166,8 +216,7 @@ impl<'src, 'i> VM<'i> {
                     }
                 }
                 OpCode::SetGlobal => {
-                    let index = self.read_byte();
-                    let istring = self.chunk.read_string(index);
+                    let istring = self.read_string();
                     let value = self.peek(0).unwrap();
                     if self.globals.insert(istring, *value).is_none() {
                         self.globals.remove(&istring);
@@ -178,28 +227,28 @@ impl<'src, 'i> VM<'i> {
                     }
                 }
                 OpCode::GetLocal => {
-                    let slot = self.read_byte();
-                    let value = self.stack[slot as usize];
+                    let slot = self.read_byte() as usize + self.current_frame().slot;
+                    let value = self.stack[slot];
                     self.stack.push(value);
                 }
                 OpCode::SetLocal => {
-                    let slot = self.read_byte();
+                    let slot = self.read_byte() as usize + self.current_frame().slot;
                     let value = *self.peek(0).unwrap();
                     self.stack[slot as usize] = value;
                 }
                 OpCode::JumpIfFalse => {
                     let offset = self.read_short();
                     if self.peek(0).unwrap().is_falsey() {
-                        self.ip += offset as usize;
+                        self.current_frame_mut().ip += offset as usize;
                     }
                 }
                 OpCode::Jump => {
                     let offset = self.read_short();
-                    self.ip += offset as usize;
+                    self.current_frame_mut().ip += offset as usize;
                 }
                 OpCode::Loop => {
                     let offset = self.read_short();
-                    self.ip -= offset as usize;
+                    self.current_frame_mut().ip -= offset as usize;
                 }
             }
         }

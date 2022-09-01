@@ -1,6 +1,7 @@
 mod chunk;
 mod compiler;
 mod disassembler;
+mod function;
 mod scanner;
 mod strings;
 mod value;

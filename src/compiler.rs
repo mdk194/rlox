@@ -1,6 +1,7 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use crate::chunk::{Chunk, OpCode};
+use crate::function::{Function, FunctionType};
 use crate::scanner::{Scanner, Token, TokenType};
 use crate::strings::Interner;
 use crate::value::Value;
@@ -16,16 +17,23 @@ impl<'src> Local<'src> {
     }
 }
 
+#[allow(dead_code)]
 struct Compiler<'src> {
+    function: Function,
+    function_type: FunctionType,
     locals: Vec<Local<'src>>,
     scope_depth: i32,
 }
 
 impl<'src> Compiler<'src> {
     const MAX_LOCAL: usize = std::u8::MAX as usize + 1;
-    fn new() -> Self {
+    fn new(function_type: FunctionType) -> Self {
+        let mut locals = Vec::with_capacity(Compiler::MAX_LOCAL);
+        locals.push(Local::new(Token::default(), 0));
         Compiler {
-            locals: Vec::with_capacity(Compiler::MAX_LOCAL),
+            function: Function::default(),
+            function_type,
+            locals,
             scope_depth: 0,
         }
     }
@@ -33,7 +41,6 @@ impl<'src> Compiler<'src> {
 
 pub struct Parser<'src, 'i> {
     rules: Vec<(TokenType, ParseRule<'src, 'i>)>,
-    chunk: &'src mut Chunk,
     strings: &'src mut Interner<'i>,
     scanner: Scanner<'src>,
     compiler: Compiler<'src>,
@@ -70,7 +77,7 @@ struct ParseRule<'src, 'i> {
 
 impl<'src, 'i> Parser<'src, 'i> {
     #[rustfmt::skip]
-    pub fn new(source: &'src str, chunk: &'src mut Chunk, strings: &'src mut Interner<'i>) -> Self {
+    pub fn new(source: &'src str, strings: &'src mut Interner<'i>) -> Self {
         let mut rules = Vec::new();
         let mut r = |t, prefix, infix, precedence| {
             rules.push((t, ParseRule{prefix, infix, precedence}));
@@ -119,10 +126,9 @@ impl<'src, 'i> Parser<'src, 'i> {
 
         Parser {
             rules,
-            chunk,
             strings,
             scanner: Scanner::new(source),
-            compiler: Compiler::new(),
+            compiler: Compiler::new(FunctionType::Script),
             current: Token::default(),
             previous: Token::default(),
             has_error: false,
@@ -130,13 +136,24 @@ impl<'src, 'i> Parser<'src, 'i> {
         }
     }
 
-    pub fn compile(&mut self) -> bool {
+    fn current_chunk(&self) -> &Chunk {
+        &self.compiler.function.chunk
+    }
+
+    fn current_chunk_mut(&mut self) -> &mut Chunk {
+        &mut self.compiler.function.chunk
+    }
+
+    pub fn compile(mut self) -> Option<Function> {
         self.advance();
         while !self.matches(TokenType::Eof) {
             self.declaration();
         }
         self.emit(OpCode::Return);
-        !self.has_error
+        if self.has_error {
+            return None;
+        }
+        Some(self.compiler.function)
     }
 
     fn advance(&mut self) {
@@ -343,16 +360,16 @@ impl<'src, 'i> Parser<'src, 'i> {
     }
 
     fn patch_jump(&mut self, offset: usize) {
-        let jump = self.chunk.code.len() - offset - 2;
+        let jump = self.current_chunk_mut().code.len() - offset - 2;
 
         if jump as u16 > std::u16::MAX {
             self.error("Too much code to jump over.");
         }
 
         let f = (jump >> 8) & 0xff;
-        self.chunk.code[offset] = f as u8;
+        self.current_chunk_mut().code[offset] = f as u8;
         let s = jump & 0xff;
-        self.chunk.code[offset + 1] = s as u8;
+        self.current_chunk_mut().code[offset + 1] = s as u8;
     }
 
     fn and(&mut self, _can_assign: bool) {
@@ -374,7 +391,7 @@ impl<'src, 'i> Parser<'src, 'i> {
     }
 
     fn while_statement(&mut self) {
-        let loop_start = self.chunk.code.len();
+        let loop_start = self.current_chunk().code.len();
         self.consume(TokenType::LeftParen, "Expect '(' after 'while'.");
         self.expression();
         self.consume(TokenType::RightParen, "Expect ')' after condition.");
@@ -400,7 +417,7 @@ impl<'src, 'i> Parser<'src, 'i> {
             self.expression_statement();
         }
 
-        let mut loop_start = self.chunk.code.len();
+        let mut loop_start = self.current_chunk().code.len();
         let mut exit_jump = None;
         if !self.matches(TokenType::Semicolon) {
             self.expression();
@@ -413,7 +430,7 @@ impl<'src, 'i> Parser<'src, 'i> {
 
         if !self.matches(TokenType::RightParen) {
             let body_jump = self.emit_jump(OpCode::Jump);
-            let increment_start = self.chunk.code.len();
+            let increment_start = self.current_chunk().code.len();
             self.expression();
             self.emit(OpCode::Pop);
             self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
@@ -481,11 +498,13 @@ impl<'src, 'i> Parser<'src, 'i> {
     }
 
     fn emit(&mut self, o: OpCode) {
-        self.chunk.write(o as u8, self.previous.line);
+        let line = self.previous.line;
+        self.current_chunk_mut().write(o as u8, line);
     }
 
     fn emit_byte(&mut self, b: u8) {
-        self.chunk.write(b, self.previous.line);
+        let line = self.previous.line;
+        self.current_chunk_mut().write(b, line);
     }
 
     fn emit_bytes(&mut self, b1: u8, b2: u8) {
@@ -497,13 +516,13 @@ impl<'src, 'i> Parser<'src, 'i> {
         self.emit(o);
         self.emit_byte(0xff);
         self.emit_byte(0xff);
-        self.chunk.code.len() - 2
+        self.current_chunk().code.len() - 2
     }
 
     fn emit_loop(&mut self, loop_start: usize) {
         self.emit(OpCode::Loop);
 
-        let offset = self.chunk.code.len() - loop_start + 2;
+        let offset = self.current_chunk().code.len() - loop_start + 2;
         if offset as u16 > std::u16::MAX {
             self.error("Loop body too large.");
         }
@@ -573,7 +592,7 @@ impl<'src, 'i> Parser<'src, 'i> {
     }
 
     fn make_constant(&mut self, v: Value) -> u8 {
-        let index = self.chunk.add_constant(v);
+        let index = self.current_chunk_mut().add_constant(v);
         match u8::try_from(index) {
             Ok(i) => i,
             Err(_) => {

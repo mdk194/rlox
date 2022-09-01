@@ -31,7 +31,7 @@ pub enum OpCode {
     Loop,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Chunk {
     pub code: Vec<u8>,
     pub constants: Vec<Value>,
@@ -39,14 +39,6 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new() -> Self {
-        Chunk {
-            code: Vec::new(),
-            constants: Vec::new(),
-            lines: Vec::new(),
-        }
-    }
-
     pub fn read_constant(&self, index: u8) -> Value {
         self.constants[index as usize]
     }
