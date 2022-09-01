@@ -1,5 +1,7 @@
+use crate::function::Functions;
 use crate::strings::Interner;
 use crate::value::Value;
+
 #[allow(unused_imports)]
 use crate::{Chunk, OpCode};
 
@@ -7,12 +9,17 @@ use crate::{Chunk, OpCode};
 pub struct Disassembler<'a, 'i> {
     chunk: &'a Chunk,
     strings: &'a Interner<'i>,
+    functions: &'a Functions,
 }
 
 #[allow(dead_code)]
 impl<'a, 'i> Disassembler<'a, 'i> {
-    pub fn new(chunk: &'a Chunk, strings: &'a Interner<'i>) -> Self {
-        Disassembler { chunk, strings }
+    pub fn new(chunk: &'a Chunk, strings: &'a Interner<'i>, functions: &'a Functions) -> Self {
+        Disassembler {
+            chunk,
+            strings,
+            functions,
+        }
     }
 
     #[cfg(debug_assertions)]
@@ -61,6 +68,7 @@ impl<'a, 'i> Disassembler<'a, 'i> {
             OpCode::JumpIfFalse => self.jump_instruction("OP_JUMP_IF_FALSE", 1, offset),
             OpCode::Jump => self.jump_instruction("OP_JUMP", 1, offset),
             OpCode::Loop => self.jump_instruction("OP_LOOP", -1, offset),
+            OpCode::Call => self.byte_instruction("OP_CALL", offset),
         }
     }
 
@@ -72,10 +80,22 @@ impl<'a, 'i> Disassembler<'a, 'i> {
     fn constant_instruction(&self, name: &str, offset: usize) -> usize {
         let index = self.chunk.code[offset + 1];
         let value = &self.chunk.constants[index as usize];
-        if let Value::String(i) = value {
-            println!("{:<16} {:4} '{}'", name, offset, self.strings.lookup(*i));
-        } else {
-            println!("{:<16} {:4} '{}'", name, offset, value);
+        match value {
+            Value::String(i) => {
+                println!("{:<16} {:4} '{}'", name, offset, self.strings.lookup(*i));
+            }
+            Value::Function(i) => {
+                let fn_name = self.functions.lookup(*i).name.unwrap();
+                println!(
+                    "{:<16} {:4} '<fn {}>'",
+                    name,
+                    offset,
+                    self.strings.lookup(fn_name)
+                );
+            }
+            _ => {
+                println!("{:<16} {:4} '{}'", name, offset, value);
+            }
         }
         offset + 2
     }

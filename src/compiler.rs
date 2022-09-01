@@ -1,9 +1,9 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use crate::chunk::{Chunk, OpCode};
-use crate::function::{Function, FunctionType};
+use crate::function::{Function, FunctionType, Functions};
 use crate::scanner::{Scanner, Token, TokenType};
-use crate::strings::Interner;
+use crate::strings::{IString, Interner};
 use crate::value::Value;
 
 struct Local<'src> {
@@ -19,6 +19,7 @@ impl<'src> Local<'src> {
 
 #[allow(dead_code)]
 struct Compiler<'src> {
+    enclosing: Option<Box<Compiler<'src>>>,
     function: Function,
     function_type: FunctionType,
     locals: Vec<Local<'src>>,
@@ -27,11 +28,12 @@ struct Compiler<'src> {
 
 impl<'src> Compiler<'src> {
     const MAX_LOCAL: usize = std::u8::MAX as usize + 1;
-    fn new(function_type: FunctionType) -> Self {
+    fn new(function_name: Option<IString>, function_type: FunctionType) -> Self {
         let mut locals = Vec::with_capacity(Compiler::MAX_LOCAL);
         locals.push(Local::new(Token::default(), 0));
         Compiler {
-            function: Function::default(),
+            enclosing: None,
+            function: Function::new(function_name),
             function_type,
             locals,
             scope_depth: 0,
@@ -44,6 +46,7 @@ pub struct Parser<'src, 'i> {
     strings: &'src mut Interner<'i>,
     scanner: Scanner<'src>,
     compiler: Compiler<'src>,
+    functions: &'src mut Functions,
     current: Token<'src>,
     previous: Token<'src>,
     has_error: bool,
@@ -77,13 +80,13 @@ struct ParseRule<'src, 'i> {
 
 impl<'src, 'i> Parser<'src, 'i> {
     #[rustfmt::skip]
-    pub fn new(source: &'src str, strings: &'src mut Interner<'i>) -> Self {
+    pub fn new(source: &'src str, strings: &'src mut Interner<'i>, functions: &'src mut Functions) -> Self {
         let mut rules = Vec::new();
         let mut r = |t, prefix, infix, precedence| {
             rules.push((t, ParseRule{prefix, infix, precedence}));
         };
 
-        r(TokenType::LeftParen,    Some(Parser::grouping), None,                 Precedence::None);
+        r(TokenType::LeftParen,    Some(Parser::grouping), Some(Parser::call),   Precedence::Call);
         r(TokenType::RightParen,   None,                   None,                 Precedence::None);
         r(TokenType::LeftBrace,    None,                   None,                 Precedence::None);
         r(TokenType::RightBrace,   None,                   None,                 Precedence::None);
@@ -128,7 +131,8 @@ impl<'src, 'i> Parser<'src, 'i> {
             rules,
             strings,
             scanner: Scanner::new(source),
-            compiler: Compiler::new(FunctionType::Script),
+            compiler: Compiler::new(None, FunctionType::Script),
+            functions,
             current: Token::default(),
             previous: Token::default(),
             has_error: false,
@@ -149,7 +153,7 @@ impl<'src, 'i> Parser<'src, 'i> {
         while !self.matches(TokenType::Eof) {
             self.declaration();
         }
-        self.emit(OpCode::Return);
+        self.emit_return();
         if self.has_error {
             return None;
         }
@@ -174,7 +178,9 @@ impl<'src, 'i> Parser<'src, 'i> {
     }
 
     fn declaration(&mut self) {
-        if self.matches(TokenType::Var) {
+        if self.matches(TokenType::Fun) {
+            self.fun_declaration();
+        } else if self.matches(TokenType::Var) {
             self.var_declaration();
         } else {
             self.statement();
@@ -183,6 +189,58 @@ impl<'src, 'i> Parser<'src, 'i> {
         if self.panic_mode {
             self.synchronize();
         }
+    }
+
+    fn fun_declaration(&mut self) {
+        let global = self.parse_variable("Expect function name.");
+        self.mark_initialized();
+        self.function(FunctionType::Function);
+        self.define_variable(global);
+    }
+
+    fn push_compiler(&mut self, ftype: FunctionType) {
+        let ifunction = self.strings.intern(self.previous.lexeme);
+        let c = Compiler::new(Some(ifunction), ftype);
+        let enclosing = std::mem::replace(&mut self.compiler, c);
+        self.compiler.enclosing = Some(Box::new(enclosing));
+    }
+
+    fn pop_compiler(&mut self) -> Function {
+        self.emit_return();
+        let enclosing = self.compiler.enclosing.take();
+        let c = std::mem::replace(
+            &mut self.compiler,
+            *enclosing.expect("pop_compiler: mem replace enclosing compiler"),
+        );
+        c.function
+    }
+
+    fn function(&mut self, ftype: FunctionType) {
+        self.push_compiler(ftype);
+        self.begin_scope();
+
+        self.consume(TokenType::LeftParen, "Expect '(' after function name.");
+        if !self.check(TokenType::RightParen) {
+            loop {
+                self.compiler.function.arity += 1;
+                if self.compiler.function.arity > 255 {
+                    self.error_at_current("Can't have more than 255 parameters.");
+                }
+                let constant = self.parse_variable("Expect parameter name.");
+                self.define_variable(constant);
+                if !self.matches(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RightParen, "Expect ')' after parameters.");
+        self.consume(TokenType::LeftBrace, "Expect '{' before function body.");
+        self.block();
+
+        let f = self.pop_compiler();
+        let ifunction = self.functions.add(f);
+        let index = self.make_constant(Value::Function(ifunction));
+        self.emit_bytes(OpCode::Constant as u8, index as u8);
     }
 
     fn variable(&mut self, can_assign: bool) {
@@ -233,6 +291,10 @@ impl<'src, 'i> Parser<'src, 'i> {
     }
 
     fn mark_initialized(&mut self) {
+        if self.compiler.scope_depth == 0 {
+            return;
+        }
+
         let l = self.compiler.locals.last_mut().unwrap();
         l.depth = self.compiler.scope_depth;
     }
@@ -328,6 +390,8 @@ impl<'src, 'i> Parser<'src, 'i> {
             self.for_statement();
         } else if self.matches(TokenType::If) {
             self.if_statement();
+        } else if self.matches(TokenType::Return) {
+            self.return_statement();
         } else if self.matches(TokenType::While) {
             self.while_statement();
         } else if self.matches(TokenType::LeftBrace) {
@@ -388,6 +452,43 @@ impl<'src, 'i> Parser<'src, 'i> {
 
         self.parse_precedence(Precedence::Or);
         self.patch_jump(end_jump);
+    }
+
+    fn call(&mut self, _can_assign: bool) {
+        let arg_count = self.argument_list();
+        self.emit_bytes(OpCode::Call as u8, arg_count as u8);
+    }
+
+    fn argument_list(&mut self) -> usize {
+        let mut arg_count = 0;
+        if !self.check(TokenType::RightParen) {
+            loop {
+                self.expression();
+                if arg_count == 255 {
+                    self.error("Can't have more than 255 arguments.");
+                }
+                arg_count += 1;
+                if !self.matches(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RightParen, "Expect ')' after arguments.");
+        arg_count
+    }
+
+    fn return_statement(&mut self) {
+        if self.compiler.function_type == FunctionType::Script {
+            self.error("Can't return from top-level code.");
+        }
+
+        if self.matches(TokenType::Semicolon) {
+            self.emit_return();
+        } else {
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expect ';' after return value.");
+            self.emit(OpCode::Return);
+        }
     }
 
     fn while_statement(&mut self) {
@@ -531,6 +632,11 @@ impl<'src, 'i> Parser<'src, 'i> {
         let s = offset & 0xff;
         self.emit_byte(f as u8);
         self.emit_byte(s as u8);
+    }
+
+    fn emit_return(&mut self) {
+        self.emit(OpCode::Nil);
+        self.emit(OpCode::Return);
     }
 
     fn consume(&mut self, ttype: TokenType, msg: &str) {

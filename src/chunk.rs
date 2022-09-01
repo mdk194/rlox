@@ -29,6 +29,7 @@ pub enum OpCode {
     JumpIfFalse,
     Jump,
     Loop,
+    Call,
 }
 
 #[derive(Debug, Default)]

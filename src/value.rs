@@ -18,7 +18,12 @@ impl fmt::Display for Value {
             Value::Bool(v) => write!(f, "{}", v),
             Value::Number(v) => write!(f, "{}", v),
             Value::String(v) => write!(f, "<s:{}>", v),
-            Value::Function(v) => write!(f, "<fn:{}>", v),
+            Value::Function(v) => {
+                if *v == 0 {
+                    return write!(f, "<script>");
+                }
+                write!(f, "<fn:{}>", v)
+            }
         }
     }
 }

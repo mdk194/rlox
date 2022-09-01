@@ -59,18 +59,14 @@ impl<'src, 'i> VM<'i> {
     }
 
     pub fn interpret(&'src mut self, source: &'src str) -> InterpretResult {
-        let p = Parser::new(source, &mut self.strings);
+        let p = Parser::new(source, &mut self.strings, &mut self.functions);
 
         match p.compile() {
             None => return Err(VMError::CompileError),
             Some(f) => {
                 let ifunction = self.functions.add(f);
                 self.stack.push(Value::Function(ifunction));
-                self.frames.push(CallFrame {
-                    ifunction,
-                    ip: 0,
-                    slot: 0,
-                });
+                self.call(ifunction, 0);
             }
         }
 
@@ -111,11 +107,49 @@ impl<'src, 'i> VM<'i> {
 
     pub fn runtime_error(&mut self, msg: &str) {
         eprintln!("{}", msg);
-        let frame = self.current_frame();
-        let chunk = self.current_chunk();
-        let line = chunk.lines[frame.ip - 1];
-        eprintln!("[line {}] in script", line);
+        self.frames.iter().rev().for_each(|frame| {
+            let f = self.functions.lookup(frame.ifunction);
+            let line = frame.ip - 1;
+
+            match f.name {
+                Some(istring) => {
+                    let function_name = self.strings.lookup(istring);
+                    eprintln!(
+                        "[line {}] in {}()",
+                        f.chunk.lines[line], function_name
+                    );
+                }
+                None => eprintln!("[line {}] in script", f.chunk.lines[line]),
+            };
+        });
         self.stack.clear();
+    }
+
+    pub fn call_value(&mut self, callee: Value, arg_count: u8) -> bool {
+        if let Value::Function(ifunction) = callee {
+            return self.call(ifunction, arg_count as usize);
+        }
+        self.runtime_error("Can only call funtions and classes.");
+        false
+    }
+
+    fn call(&mut self, ifunction: IFunction, arg_count: usize) -> bool {
+        let f = self.functions.lookup(ifunction);
+
+        if arg_count != f.arity {
+            self.runtime_error(format!("Expected {} arguments but got {}.", f.arity, arg_count).as_str());
+            return false;
+        } else if self.frames.len() == VM::FRAME_MAX {
+            self.runtime_error("Stack overflow.");
+            return false;
+        }
+        let frame = CallFrame {
+            ifunction,
+            ip: 0,
+            slot: self.stack.len() - arg_count - 1,
+        };
+        self.frames.push(frame);
+        true
     }
 
     pub fn run(&'src mut self) -> InterpretResult {
@@ -148,13 +182,23 @@ impl<'src, 'i> VM<'i> {
                 print!("          ");
                 self.stack.iter().for_each(|v| print!("[ {} ]", v));
                 println!();
-                let d = Disassembler::new(self.current_chunk(), &self.strings);
+                let d = Disassembler::new(self.current_chunk(), &self.strings, &self.functions);
                 d.instruction(self.current_frame().ip);
             }
 
             let op = OpCode::try_from(self.read_byte()).unwrap();
             match op {
-                OpCode::Return => return Ok(()),
+                OpCode::Return => {
+                    let result = self.stack.pop().unwrap();
+                    let frame = self.frames.pop().unwrap();
+
+                    if self.frames.is_empty() {
+                        return Ok(());
+                    } else {
+                        self.stack.truncate(frame.slot);
+                        self.stack.push(result);
+                    }
+                }
                 OpCode::Constant => {
                     let c = self.read_constant();
                     self.stack.push(c);
@@ -188,10 +232,17 @@ impl<'src, 'i> VM<'i> {
                 OpCode::Less => binary_op!(Bool, <),
                 OpCode::Print => {
                     if let Some(v) = self.stack.pop() {
-                        if let Value::String(i) = v {
-                            println!("{}", self.strings.lookup(i));
-                        } else {
-                            println!("{}", v);
+                        match v {
+                            Value::String(i) => {
+                                println!("{}", self.strings.lookup(i));
+                            }
+                            Value::Function(i) => {
+                                let istring = self.functions.lookup(i).name.unwrap();
+                                println!("<fn {}>", self.strings.lookup(istring));
+                            }
+                            _ => {
+                                println!("{}", v);
+                            }
                         }
                     }
                 }
@@ -249,6 +300,13 @@ impl<'src, 'i> VM<'i> {
                 OpCode::Loop => {
                     let offset = self.read_short();
                     self.current_frame_mut().ip -= offset as usize;
+                }
+                OpCode::Call => {
+                    let arg_count = self.read_byte();
+                    let callee = *self.peek(arg_count as usize).unwrap();
+                    if !self.call_value(callee, arg_count) {
+                        return Err(VMError::RuntimeError);
+                    }
                 }
             }
         }
