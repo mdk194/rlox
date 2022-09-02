@@ -31,3 +31,10 @@ TODO:
 - 29: superclasses
 - 30: optimization
 
+## Copyright
+
+Test files are copied from [Crafting Interpreters repository](https://github.com/munificent/craftinginterpreters).
+
+I consult some code from [Manuel Cerón's loxido repository](https://github.com/ceronman/loxido).
+
+This repo is licensed as MIT [LICENCE](LICENSE)
