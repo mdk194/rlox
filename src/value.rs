@@ -1,13 +1,14 @@
-use crate::function::{Functions, IFunction};
+use crate::function::{Functions, IFunction, NativeFn};
 use crate::strings::{IString, Interner};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub enum Value {
     Bool(bool),
     Nil,
     Number(f64),
     String(IString),
     Function(IFunction),
+    NativeFunction(NativeFn),
 }
 
 impl Value {
@@ -27,6 +28,7 @@ impl Value {
                 }
                 "<script>".to_owned()
             }
+            Value::NativeFunction(_) => "<native fn>".to_owned(),
         }
     }
 }
@@ -38,6 +40,8 @@ impl PartialEq for Value {
             (Value::Nil, _) => true,
             (Value::Number(s), Value::Number(o)) => s == o,
             (Value::String(s), Value::String(o)) => s == o,
+            (Value::Function(s), Value::Function(o)) => s == o,
+            (Value::NativeFunction(s), Value::NativeFunction(o)) => std::ptr::eq(s, o),
             _ => false,
         }
     }

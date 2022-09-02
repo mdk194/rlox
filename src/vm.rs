@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 use typed_arena::Arena;
 
 use crate::{
-    function::{Functions, IFunction},
+    function::{clock, Functions, IFunction, NativeFn},
     strings::{IString, Interner},
 };
 
@@ -35,13 +35,20 @@ impl<'src, 'i> VM<'i> {
     const STACK_MAX: usize = VM::FRAME_MAX * (std::u8::MAX as usize + 1);
 
     pub fn new(arena: &'i Arena<u8>) -> Self {
-        VM {
+        let mut vm = VM {
             frames: Vec::with_capacity(VM::FRAME_MAX),
             functions: Functions::new(),
             stack: Vec::with_capacity(VM::STACK_MAX),
             strings: Interner::new(arena),
             globals: FxHashMap::default(),
-        }
+        };
+        vm.define_native("clock", clock);
+        vm
+    }
+
+    fn define_native(&mut self, name: &str, f: NativeFn) {
+        let istring = self.strings.intern(name);
+        self.globals.insert(istring, Value::NativeFunction(f));
     }
 
     fn current_frame(&self) -> &CallFrame {
@@ -123,11 +130,19 @@ impl<'src, 'i> VM<'i> {
     }
 
     pub fn call_value(&mut self, callee: Value, arg_count: u8) -> bool {
-        if let Value::Function(ifunction) = callee {
-            return self.call(ifunction, arg_count as usize);
+        match callee {
+            Value::Function(ifunction) => self.call(ifunction, arg_count as usize),
+            Value::NativeFunction(f) => {
+                let left = self.stack.len() - arg_count as usize;
+                let result = f(&self.stack[left..]);
+                self.stack.push(result);
+                true
+            }
+            _ => {
+                self.runtime_error("Can only call funtions and classes.");
+                false
+            }
         }
-        self.runtime_error("Can only call funtions and classes.");
-        false
     }
 
     fn call(&mut self, ifunction: IFunction, arg_count: usize) -> bool {

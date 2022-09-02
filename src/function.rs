@@ -1,5 +1,7 @@
 use crate::chunk::Chunk;
 use crate::strings::IString;
+use crate::value::Value;
+use std::time::{self, SystemTime};
 
 #[allow(dead_code)]
 #[derive(Default, PartialEq, Eq)]
@@ -46,4 +48,14 @@ impl Functions {
         self.fs.push(f);
         self.fs.len() - 1
     }
+}
+
+pub type NativeFn = fn(&[Value]) -> Value;
+
+pub fn clock(_args: &[Value]) -> Value {
+    let start = SystemTime::now();
+    let time = start
+        .duration_since(time::UNIX_EPOCH)
+        .expect("duration since epoch");
+    Value::Number(time.as_secs_f64())
 }
