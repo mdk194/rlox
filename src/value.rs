@@ -1,5 +1,5 @@
-use crate::function::{Functions, IFunction, NativeFn};
-use crate::strings::{IString, Interner};
+use crate::object::{IObject, NativeFn};
+use crate::strings::IString;
 
 #[derive(Clone, Copy)]
 pub enum Value {
@@ -7,29 +7,14 @@ pub enum Value {
     Nil,
     Number(f64),
     String(IString),
-    Function(IFunction),
+    Function(IObject),
     NativeFunction(NativeFn),
+    Closure(IObject),
 }
 
 impl Value {
     pub fn is_falsey(&self) -> bool {
         matches!(self, Value::Nil | Value::Bool(false))
-    }
-
-    pub fn as_string(&self, strings: &Interner, functions: &Functions) -> String {
-        match self {
-            Value::Nil => "nil".to_owned(),
-            Value::Bool(v) => format!("{}", v),
-            Value::Number(v) => format!("{}", v),
-            Value::String(i) => strings.lookup(*i).to_owned(),
-            Value::Function(i) => {
-                if let Some(fn_name) = functions.lookup(*i).name {
-                    return format!("<fn {}>", strings.lookup(fn_name));
-                }
-                "<script>".to_owned()
-            }
-            Value::NativeFunction(_) => "<native fn>".to_owned(),
-        }
     }
 }
 
@@ -42,6 +27,7 @@ impl PartialEq for Value {
             (Value::String(s), Value::String(o)) => s == o,
             (Value::Function(s), Value::Function(o)) => s == o,
             (Value::NativeFunction(s), Value::NativeFunction(o)) => std::ptr::eq(s, o),
+            (Value::Closure(s), Value::Closure(o)) => s == o,
             _ => false,
         }
     }

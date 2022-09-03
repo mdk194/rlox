@@ -29,24 +29,24 @@ impl Function {
     }
 }
 
-pub type IFunction = usize;
+pub type IObject = usize;
 
-pub struct Functions {
-    fs: Vec<Function>,
+pub struct Objects<O> {
+    v: Vec<O>,
 }
 
-impl Functions {
+impl<O> Objects<O> {
     pub fn new() -> Self {
-        Self { fs: Vec::new() }
+        Self { v: Vec::new() }
     }
 
-    pub fn lookup(&self, id: IFunction) -> &Function {
-        &self.fs[id]
+    pub fn lookup(&self, id: IObject) -> &O {
+        &self.v[id]
     }
 
-    pub fn add(&mut self, f: Function) -> IFunction {
-        self.fs.push(f);
-        self.fs.len() - 1
+    pub fn add(&mut self, o: O) -> IObject {
+        self.v.push(o);
+        self.v.len() - 1
     }
 }
 
@@ -58,4 +58,14 @@ pub fn clock(_args: &[Value]) -> Value {
         .duration_since(time::UNIX_EPOCH)
         .expect("duration since epoch");
     Value::Number(time.as_secs_f64())
+}
+
+pub struct Closure {
+    pub ifunction: IObject,
+}
+
+impl Closure {
+    pub fn new(ifunction: IObject) -> Self {
+        Self { ifunction }
+    }
 }

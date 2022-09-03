@@ -1,24 +1,16 @@
-use crate::function::Functions;
-use crate::strings::Interner;
-
+use crate::vm::VM;
 #[allow(unused_imports)]
 use crate::{Chunk, OpCode};
 
-#[allow(dead_code)]
-pub struct Disassembler<'a, 'i> {
+pub struct Disassembler<'a> {
     chunk: &'a Chunk,
-    strings: &'a Interner<'i>,
-    functions: &'a Functions,
+    vm: &'a VM<'a>,
 }
 
 #[allow(dead_code)]
-impl<'a, 'i> Disassembler<'a, 'i> {
-    pub fn new(chunk: &'a Chunk, strings: &'a Interner<'i>, functions: &'a Functions) -> Self {
-        Disassembler {
-            chunk,
-            strings,
-            functions,
-        }
+impl<'a> Disassembler<'a> {
+    pub fn new(chunk: &'a Chunk, vm: &'a VM<'a>) -> Self {
+        Disassembler { chunk, vm }
     }
 
     #[cfg(debug_assertions)]
@@ -68,6 +60,17 @@ impl<'a, 'i> Disassembler<'a, 'i> {
             OpCode::Jump => self.jump_instruction("OP_JUMP", 1, offset),
             OpCode::Loop => self.jump_instruction("OP_LOOP", -1, offset),
             OpCode::Call => self.byte_instruction("OP_CALL", offset),
+            OpCode::Closure => {
+                let constant = self.chunk.code[offset + 1];
+                let value = self.chunk.constants[constant as usize];
+                println!(
+                    "{:<16} {:4} '{}'",
+                    "OP_CLOSURE",
+                    constant,
+                    self.vm.print_value(value),
+                );
+                offset + 2
+            }
         }
     }
 
@@ -83,7 +86,7 @@ impl<'a, 'i> Disassembler<'a, 'i> {
             "{:<16} {:4} '{}'",
             name,
             offset,
-            value.as_string(self.strings, self.functions)
+            self.vm.print_value(*value),
         );
         offset + 2
     }

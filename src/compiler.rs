@@ -1,7 +1,7 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use crate::chunk::{Chunk, OpCode};
-use crate::function::{Function, FunctionType, Functions};
+use crate::object::{Function, FunctionType, Objects};
 use crate::scanner::{Scanner, Token, TokenType};
 use crate::strings::{IString, Interner};
 use crate::value::Value;
@@ -46,7 +46,7 @@ pub struct Parser<'src, 'i> {
     strings: &'src mut Interner<'i>,
     scanner: Scanner<'src>,
     compiler: Compiler<'src>,
-    functions: &'src mut Functions,
+    functions: &'src mut Objects<Function>,
     current: Token<'src>,
     previous: Token<'src>,
     has_error: bool,
@@ -80,7 +80,7 @@ struct ParseRule<'src, 'i> {
 
 impl<'src, 'i> Parser<'src, 'i> {
     #[rustfmt::skip]
-    pub fn new(source: &'src str, strings: &'src mut Interner<'i>, functions: &'src mut Functions) -> Self {
+    pub fn new(source: &'src str, strings: &'src mut Interner<'i>, functions: &'src mut Objects<Function>) -> Self {
         let mut rules = Vec::new();
         let mut r = |t, prefix, infix, precedence| {
             rules.push((t, ParseRule{prefix, infix, precedence}));
@@ -240,7 +240,7 @@ impl<'src, 'i> Parser<'src, 'i> {
         let f = self.pop_compiler();
         let ifunction = self.functions.add(f);
         let index = self.make_constant(Value::Function(ifunction));
-        self.emit_bytes(OpCode::Constant as u8, index as u8);
+        self.emit_bytes(OpCode::Closure as u8, index as u8);
     }
 
     fn variable(&mut self, can_assign: bool) {

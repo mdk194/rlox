@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 use typed_arena::Arena;
 
 use crate::{
-    function::{clock, Functions, IFunction, NativeFn},
+    object::{clock, Closure, Function, IObject, NativeFn, Objects},
     strings::{IString, Interner},
 };
 
@@ -10,14 +10,27 @@ use crate::{
 use crate::{compiler::Parser, disassembler::Disassembler, value::Value, Chunk, OpCode};
 
 struct CallFrame {
-    ifunction: IFunction,
+    iclosure: IObject,
+    ifunction: IObject,
     ip: usize,
     slot: usize,
 }
 
+impl CallFrame {
+    fn new(iclosure: IObject, ifunction: IObject, slot: usize) -> Self {
+        Self {
+            iclosure,
+            ifunction,
+            ip: 0,
+            slot,
+        }
+    }
+}
+
 pub struct VM<'i> {
     frames: Vec<CallFrame>,
-    functions: Functions,
+    functions: Objects<Function>,
+    closures: Objects<Closure>,
     stack: Vec<Value>,
     strings: Interner<'i>,
     globals: FxHashMap<IString, Value>,
@@ -37,7 +50,8 @@ impl<'src, 'i> VM<'i> {
     pub fn new(arena: &'i Arena<u8>) -> Self {
         let mut vm = VM {
             frames: Vec::with_capacity(VM::FRAME_MAX),
-            functions: Functions::new(),
+            functions: Objects::new(),
+            closures: Objects::new(),
             stack: Vec::with_capacity(VM::STACK_MAX),
             strings: Interner::new(arena),
             globals: FxHashMap::default(),
@@ -69,15 +83,16 @@ impl<'src, 'i> VM<'i> {
         let p = Parser::new(source, &mut self.strings, &mut self.functions);
 
         match p.compile() {
-            None => return Err(VMError::CompileError),
+            None => Err(VMError::CompileError),
             Some(f) => {
                 let ifunction = self.functions.add(f);
-                self.stack.push(Value::Function(ifunction));
-                self.call(ifunction, 0);
+                let closure = Closure::new(ifunction);
+                let iclosure = self.closures.add(closure);
+                self.stack.push(Value::Closure(iclosure));
+                self.call(iclosure, 0);
+                self.run()
             }
         }
-
-        self.run()
     }
 
     fn read_byte(&mut self) -> u8 {
@@ -115,7 +130,8 @@ impl<'src, 'i> VM<'i> {
     pub fn runtime_error(&mut self, msg: &str) {
         eprintln!("{}", msg);
         self.frames.iter().rev().for_each(|frame| {
-            let f = self.functions.lookup(frame.ifunction);
+            let closure = self.closures.lookup(frame.iclosure);
+            let f = self.functions.lookup(closure.ifunction);
             let line = frame.ip - 1;
 
             match f.name {
@@ -131,7 +147,7 @@ impl<'src, 'i> VM<'i> {
 
     pub fn call_value(&mut self, callee: Value, arg_count: u8) -> bool {
         match callee {
-            Value::Function(ifunction) => self.call(ifunction, arg_count as usize),
+            Value::Closure(iclosure) => self.call(iclosure, arg_count as usize),
             Value::NativeFunction(f) => {
                 let left = self.stack.len() - arg_count as usize;
                 let result = f(&self.stack[left..]);
@@ -145,8 +161,9 @@ impl<'src, 'i> VM<'i> {
         }
     }
 
-    fn call(&mut self, ifunction: IFunction, arg_count: usize) -> bool {
-        let f = self.functions.lookup(ifunction);
+    fn call(&mut self, iclosure: IObject, arg_count: usize) -> bool {
+        let closure = self.closures.lookup(iclosure);
+        let f = self.functions.lookup(closure.ifunction);
 
         if arg_count != f.arity {
             self.runtime_error(
@@ -157,13 +174,36 @@ impl<'src, 'i> VM<'i> {
             self.runtime_error("Stack overflow.");
             return false;
         }
-        let frame = CallFrame {
-            ifunction,
-            ip: 0,
-            slot: self.stack.len() - arg_count - 1,
-        };
+        let frame = CallFrame::new(
+            iclosure,
+            closure.ifunction,
+            self.stack.len() - arg_count - 1,
+        );
         self.frames.push(frame);
         true
+    }
+
+    pub fn print_value(&self, v: Value) -> String {
+        match v {
+            Value::Nil => "nil".to_owned(),
+            Value::Bool(v) => format!("{}", v),
+            Value::Number(v) => format!("{}", v),
+            Value::String(i) => self.strings.lookup(i).to_owned(),
+            Value::Function(i) => {
+                if let Some(fn_name) = self.functions.lookup(i).name {
+                    return format!("<fn {}>", self.strings.lookup(fn_name));
+                }
+                "<script>".to_owned()
+            }
+            Value::NativeFunction(_) => "<native fn>".to_owned(),
+            Value::Closure(i) => {
+                let ifunction = self.closures.lookup(i).ifunction;
+                if let Some(fn_name) = self.functions.lookup(ifunction).name {
+                    return format!("<fn {}>", self.strings.lookup(fn_name));
+                }
+                "<closure>".to_owned()
+            }
+        }
     }
 
     pub fn run(&'src mut self) -> InterpretResult {
@@ -194,11 +234,11 @@ impl<'src, 'i> VM<'i> {
             #[cfg(debug_assertions)]
             {
                 print!("          ");
-                self.stack
-                    .iter()
-                    .for_each(|v| print!("[ {} ]", v.as_string(&self.strings, &self.functions)));
+                self.stack.iter().for_each(|v| {
+                    print!("[ {} ]", self.print_value(*v));
+                });
                 println!();
-                let d = Disassembler::new(self.current_chunk(), &self.strings, &self.functions);
+                let d = Disassembler::new(self.current_chunk(), self);
                 d.instruction(self.current_frame().ip);
             }
 
@@ -248,7 +288,7 @@ impl<'src, 'i> VM<'i> {
                 OpCode::Less => binary_op!(Bool, <),
                 OpCode::Print => {
                     if let Some(v) = self.stack.pop() {
-                        println!("{}", v.as_string(&self.strings, &self.functions))
+                        println!("{}", self.print_value(v));
                     }
                 }
                 OpCode::Pop => {
@@ -311,6 +351,15 @@ impl<'src, 'i> VM<'i> {
                     let callee = *self.peek(arg_count as usize).unwrap();
                     if !self.call_value(callee, arg_count) {
                         return Err(VMError::RuntimeError);
+                    }
+                }
+                OpCode::Closure => {
+                    let constant = self.read_constant();
+
+                    if let Value::Function(ifunction) = constant {
+                        let closure = Closure::new(ifunction);
+                        let iclosure = self.closures.add(closure);
+                        self.stack.push(Value::Closure(iclosure));
                     }
                 }
             }

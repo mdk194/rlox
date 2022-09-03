@@ -30,6 +30,7 @@ pub enum OpCode {
     Jump,
     Loop,
     Call,
+    Closure,
 }
 
 #[derive(Default)]
