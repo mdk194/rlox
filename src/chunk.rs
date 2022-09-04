@@ -31,6 +31,8 @@ pub enum OpCode {
     Loop,
     Call,
     Closure,
+    GetUpValue,
+    SetUpValue,
 }
 
 #[derive(Default)]

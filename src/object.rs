@@ -11,10 +11,23 @@ pub enum FunctionType {
     Script,
 }
 
+#[derive(Clone, Copy)]
+pub struct FnUpValue {
+    pub index: u8,
+    pub is_local: bool,
+}
+
+impl FnUpValue {
+    pub fn new(index: u8, is_local: bool) -> Self {
+        Self { index, is_local }
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Default)]
 pub struct Function {
     pub arity: usize,
+    pub upvalues: Vec<FnUpValue>,
     pub chunk: Chunk,
     pub name: Option<IString>,
 }
@@ -23,6 +36,7 @@ impl Function {
     pub fn new(name: Option<IString>) -> Self {
         Self {
             arity: 0,
+            upvalues: Vec::new(),
             chunk: Chunk::default(),
             name,
         }
@@ -62,10 +76,25 @@ pub fn clock(_args: &[Value]) -> Value {
 
 pub struct Closure {
     pub ifunction: IObject,
+    pub upvalues: Vec<UpValue>,
 }
 
 impl Closure {
     pub fn new(ifunction: IObject) -> Self {
-        Self { ifunction }
+        Self {
+            ifunction,
+            upvalues: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct UpValue {
+    pub location: usize,
+}
+
+impl UpValue {
+    pub fn new(location: usize) -> Self {
+        Self { location }
     }
 }

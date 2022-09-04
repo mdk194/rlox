@@ -1,3 +1,4 @@
+use crate::value::Value;
 use crate::vm::VM;
 #[allow(unused_imports)]
 use crate::{Chunk, OpCode};
@@ -69,8 +70,19 @@ impl<'a> Disassembler<'a> {
                     constant,
                     self.vm.print_value(value),
                 );
+                if let Value::Function(ifunction) = value {
+                    for uv in self.vm.upvalues(ifunction) {
+                        let is_local = if uv.is_local { "local" } else { "upvalue" };
+                        println!(
+                            "{:04}      |                     {} {}",
+                            offset, is_local, uv.index
+                        );
+                    }
+                }
                 offset + 2
             }
+            OpCode::GetUpValue => self.byte_instruction("OP_GET_UPVALUE", offset),
+            OpCode::SetUpValue => self.byte_instruction("OP_GET_UPVALUE", offset),
         }
     }
 

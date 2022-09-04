@@ -1,7 +1,7 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use crate::chunk::{Chunk, OpCode};
-use crate::object::{Function, FunctionType, Objects};
+use crate::object::{FnUpValue, Function, FunctionType, Objects};
 use crate::scanner::{Scanner, Token, TokenType};
 use crate::strings::{IString, Interner};
 use crate::value::Value;
@@ -37,6 +37,73 @@ impl<'src> Compiler<'src> {
             function_type,
             locals,
             scope_depth: 0,
+        }
+    }
+
+    fn is_declared_local(&mut self, name: Token) -> bool {
+        self.locals
+            .iter()
+            .rev()
+            .take_while(|l| l.depth == -1 || l.depth >= self.scope_depth)
+            .any(|l| l.name.lexeme == name.lexeme)
+    }
+
+    fn mark_initialized(&mut self) {
+        if self.scope_depth == 0 {
+            return;
+        }
+
+        let l = self.locals.last_mut().unwrap();
+        l.depth = self.scope_depth;
+    }
+
+    fn resolve_local(&mut self, name: Token) -> Option<Result<u8, &'static str>> {
+        self.locals
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, local)| local.name.lexeme == name.lexeme)
+            .map(|(i, local)| {
+                (local.depth != -1)
+                    .then(|| i as u8)
+                    .ok_or("Can't read local variable in its own initializer.")
+            })
+    }
+
+    fn resolve_upvalue(&mut self, name: Token) -> Option<Result<u8, &'static str>> {
+        self.enclosing.as_mut().and_then(|e| {
+            e.resolve_local(name)
+                .map(|result| {
+                    let index = result?;
+                    Compiler::add_upvalue(&mut self.function.upvalues, index, true)
+                })
+                .or_else(|| {
+                    e.resolve_upvalue(name).map(|result| {
+                        let index = result?;
+                        Compiler::add_upvalue(&mut self.function.upvalues, index, false)
+                    })
+                })
+        })
+    }
+
+    fn add_upvalue(
+        upvalues: &mut Vec<FnUpValue>,
+        index: u8,
+        is_local: bool,
+    ) -> Result<u8, &'static str> {
+        for (i, upvalue) in upvalues.iter().enumerate() {
+            if upvalue.index == index && upvalue.is_local == is_local {
+                return Ok(i.try_into().unwrap());
+            }
+        }
+
+        let upvalue_count = upvalues.len();
+        if upvalue_count == Compiler::MAX_LOCAL {
+            Err("Too many closure variables in function.")
+        } else {
+            let upvalue = FnUpValue::new(index, is_local);
+            upvalues.push(upvalue);
+            Ok(upvalue_count as u8)
         }
     }
 }
@@ -193,7 +260,7 @@ impl<'src, 'i> Parser<'src, 'i> {
 
     fn fun_declaration(&mut self) {
         let global = self.parse_variable("Expect function name.");
-        self.mark_initialized();
+        self.compiler.mark_initialized();
         self.function(FunctionType::Function);
         self.define_variable(global);
     }
@@ -250,13 +317,28 @@ impl<'src, 'i> Parser<'src, 'i> {
     fn named_variable(&mut self, t: Token, can_assign: bool) {
         let get_op;
         let set_op;
+        let arg;
 
-        let mut arg = self.resolve_local(t);
-        if arg != -1 {
+        if let Some(result) = self.compiler.resolve_local(t) {
+            arg = match result {
+                Ok(a) => a,
+                Err(msg) => {
+                    return self.error(msg);
+                }
+            };
             get_op = OpCode::GetLocal;
             set_op = OpCode::SetLocal;
+        } else if let Some(result) = self.compiler.resolve_upvalue(t) {
+            arg = match result {
+                Ok(a) => a,
+                Err(msg) => {
+                    return self.error(msg);
+                }
+            };
+            get_op = OpCode::GetUpValue;
+            set_op = OpCode::SetUpValue;
         } else {
-            arg = self.identifier_constant(t) as i32;
+            arg = self.identifier_constant(t);
             get_op = OpCode::GetGlobal;
             set_op = OpCode::SetGlobal;
         }
@@ -267,36 +349,6 @@ impl<'src, 'i> Parser<'src, 'i> {
         } else {
             self.emit_bytes(get_op as u8, arg as u8);
         }
-    }
-
-    fn resolve_local(&mut self, name: Token) -> i32 {
-        for (i, local) in self.compiler.locals.iter().enumerate().rev() {
-            if name.lexeme == local.name.lexeme {
-                if local.depth == -1 {
-                    self.error("Can't read local variable in its own initializer.");
-                }
-                return i as i32;
-            }
-        }
-        -1
-    }
-
-    fn is_declared_local(&mut self, name: Token) -> bool {
-        self.compiler
-            .locals
-            .iter()
-            .rev()
-            .take_while(|l| l.depth == -1 || l.depth >= self.compiler.scope_depth)
-            .any(|l| l.name.lexeme == name.lexeme)
-    }
-
-    fn mark_initialized(&mut self) {
-        if self.compiler.scope_depth == 0 {
-            return;
-        }
-
-        let l = self.compiler.locals.last_mut().unwrap();
-        l.depth = self.compiler.scope_depth;
     }
 
     fn var_declaration(&mut self) {
@@ -331,7 +383,7 @@ impl<'src, 'i> Parser<'src, 'i> {
         }
 
         let name = self.previous;
-        if self.is_declared_local(name) {
+        if self.compiler.is_declared_local(name) {
             self.error("Already a variable with this name in this scope.");
         }
         self.add_local(name);
@@ -353,7 +405,7 @@ impl<'src, 'i> Parser<'src, 'i> {
 
     fn define_variable(&mut self, index: u8) {
         if self.compiler.scope_depth > 0 {
-            self.mark_initialized();
+            self.compiler.mark_initialized();
             return;
         }
         self.emit_bytes(OpCode::DefineGlobal as u8, index)

@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 use typed_arena::Arena;
 
 use crate::{
-    object::{clock, Closure, Function, IObject, NativeFn, Objects},
+    object::{clock, Closure, FnUpValue, Function, IObject, NativeFn, Objects, UpValue},
     strings::{IString, Interner},
 };
 
@@ -71,6 +71,11 @@ impl<'src, 'i> VM<'i> {
 
     fn current_frame_mut(&mut self) -> &mut CallFrame {
         self.frames.last_mut().unwrap()
+    }
+
+    fn current_closure(&self) -> &Closure {
+        let iclosure = self.current_frame().iclosure;
+        self.closures.lookup(iclosure)
     }
 
     fn current_chunk(&self) -> &Chunk {
@@ -181,6 +186,14 @@ impl<'src, 'i> VM<'i> {
         );
         self.frames.push(frame);
         true
+    }
+
+    fn capture_upvalue(&self, location: usize) -> UpValue {
+        UpValue::new(location)
+    }
+
+    pub fn upvalues(&self, ifunction: IObject) -> &Vec<FnUpValue> {
+        &self.functions.lookup(ifunction).upvalues
     }
 
     pub fn print_value(&self, v: Value) -> String {
@@ -357,10 +370,32 @@ impl<'src, 'i> VM<'i> {
                     let constant = self.read_constant();
 
                     if let Value::Function(ifunction) = constant {
-                        let closure = Closure::new(ifunction);
+                        let mut closure = Closure::new(ifunction);
+                        let upvalues = &self.functions.lookup(ifunction).upvalues;
+
+                        upvalues.iter().for_each(|uv| {
+                            let uv = if uv.is_local {
+                                let location = self.current_frame().slot + uv.index as usize;
+                                self.capture_upvalue(location)
+                            } else {
+                                self.current_closure().upvalues[uv.index as usize]
+                            };
+                            closure.upvalues.push(uv);
+                        });
+
                         let iclosure = self.closures.add(closure);
                         self.stack.push(Value::Closure(iclosure));
                     }
+                }
+                OpCode::GetUpValue => {
+                    let slot = self.read_byte();
+                    self.stack
+                        .push(self.stack[self.current_closure().upvalues[slot as usize].location])
+                }
+                OpCode::SetUpValue => {
+                    let slot = self.read_byte();
+                    let location = self.current_closure().upvalues[slot as usize].location;
+                    self.stack[location] = *self.peek(0).unwrap()
                 }
             }
         }
