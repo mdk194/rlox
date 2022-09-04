@@ -1,7 +1,6 @@
-use crate::value::Value;
 use crate::vm::VM;
 #[allow(unused_imports)]
-use crate::{Chunk, OpCode};
+use crate::{Chunk, OpCode, value::Value};
 
 pub struct Disassembler<'a> {
     chunk: &'a Chunk,
@@ -83,6 +82,7 @@ impl<'a> Disassembler<'a> {
             }
             OpCode::GetUpValue => self.byte_instruction("OP_GET_UPVALUE", offset),
             OpCode::SetUpValue => self.byte_instruction("OP_GET_UPVALUE", offset),
+            OpCode::CloseUpValue => self.simple_instruction("OP_CLOSE_UPVALUE", offset),
         }
     }
 

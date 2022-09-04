@@ -33,6 +33,7 @@ pub enum OpCode {
     Closure,
     GetUpValue,
     SetUpValue,
+    CloseUpValue,
 }
 
 #[derive(Default)]

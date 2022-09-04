@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use rustc_hash::FxHashMap;
 use typed_arena::Arena;
 
@@ -188,10 +190,54 @@ impl<'src, 'i> VM<'i> {
         true
     }
 
-    fn capture_upvalue(&self, location: usize) -> UpValue {
-        UpValue::new(location)
+    fn capture_upvalue(
+        &self,
+        open_upvalue: &mut Option<Rc<RefCell<UpValue>>>,
+        location: usize,
+    ) -> Rc<RefCell<UpValue>> {
+        let mut prev_upvalue = None;
+        let mut upvalue = open_upvalue.clone();
+
+        while let Some(value) = upvalue
+            .clone()
+            .filter(|upvalue| upvalue.borrow().location > location)
+        {
+            upvalue = value.borrow().next.clone();
+            prev_upvalue = Some(value);
+        }
+
+        if let Some(value) = upvalue
+            .as_ref()
+            .filter(|upvalue| upvalue.borrow().location == location)
+        {
+            return value.clone();
+        }
+
+        let mut created_upvalue = UpValue::new(location);
+        created_upvalue.next = upvalue;
+        let created_upvalue = Rc::new(RefCell::new(created_upvalue));
+
+        if let Some(value) = prev_upvalue {
+            value.borrow_mut().next = Some(created_upvalue.clone());
+        } else {
+            *open_upvalue = Some(created_upvalue.clone());
+        }
+
+        created_upvalue
     }
 
+    fn close_upvalues(&mut self, open_upvalue: &mut Option<Rc<RefCell<UpValue>>>, last: usize) {
+        while let Some(upvalue) = open_upvalue
+            .clone()
+            .filter(|upvalue| upvalue.borrow().location >= last)
+        {
+            let value = self.stack[upvalue.borrow().location];
+            upvalue.borrow_mut().closed = Some(value);
+            *open_upvalue = upvalue.borrow_mut().next.take();
+        }
+    }
+
+    #[allow(dead_code)]
     pub fn upvalues(&self, ifunction: IObject) -> &Vec<FnUpValue> {
         &self.functions.lookup(ifunction).upvalues
     }
@@ -243,6 +289,7 @@ impl<'src, 'i> VM<'i> {
             }};
         }
 
+        let mut open_upvalue = None;
         loop {
             #[cfg(debug_assertions)]
             {
@@ -260,6 +307,7 @@ impl<'src, 'i> VM<'i> {
                 OpCode::Return => {
                     let result = self.stack.pop().unwrap();
                     let frame = self.frames.pop().unwrap();
+                    self.close_upvalues(&mut open_upvalue, frame.slot);
 
                     if self.frames.is_empty() {
                         return Ok(());
@@ -373,29 +421,46 @@ impl<'src, 'i> VM<'i> {
                         let mut closure = Closure::new(ifunction);
                         let upvalues = &self.functions.lookup(ifunction).upvalues;
 
-                        upvalues.iter().for_each(|uv| {
-                            let uv = if uv.is_local {
-                                let location = self.current_frame().slot + uv.index as usize;
-                                self.capture_upvalue(location)
+                        upvalues.iter().for_each(|upvalue| {
+                            let upvalue = if upvalue.is_local {
+                                let location = self.current_frame().slot + upvalue.index as usize;
+                                self.capture_upvalue(&mut open_upvalue, location)
                             } else {
-                                self.current_closure().upvalues[uv.index as usize]
+                                self.current_closure().upvalues[upvalue.index as usize].clone()
                             };
-                            closure.upvalues.push(uv);
+                            closure.upvalues.push(upvalue);
                         });
-
                         let iclosure = self.closures.add(closure);
                         self.stack.push(Value::Closure(iclosure));
                     }
                 }
                 OpCode::GetUpValue => {
                     let slot = self.read_byte();
-                    self.stack
-                        .push(self.stack[self.current_closure().upvalues[slot as usize].location])
+                    let value = {
+                        let closure = self.current_closure();
+                        let upvalue = closure.upvalues[slot as usize].borrow();
+                        match upvalue.closed {
+                            Some(v) => v,
+                            None => self.stack[upvalue.location],
+                        }
+                    };
+                    self.stack.push(value)
                 }
                 OpCode::SetUpValue => {
                     let slot = self.read_byte();
-                    let location = self.current_closure().upvalues[slot as usize].location;
-                    self.stack[location] = *self.peek(0).unwrap()
+                    let iclosure = self.current_frame().iclosure;
+                    let closure = self.closures.lookup(iclosure);
+                    let mut upvalue = closure.upvalues[slot as usize].borrow_mut();
+                    let value = *self.peek(0).unwrap();
+                    if upvalue.closed.is_none() {
+                        self.stack[upvalue.location] = value
+                    } else {
+                        upvalue.closed = Some(value);
+                    }
+                }
+                OpCode::CloseUpValue => {
+                    self.close_upvalues(&mut open_upvalue, self.stack.len() - 1);
+                    self.stack.pop();
                 }
             }
         }

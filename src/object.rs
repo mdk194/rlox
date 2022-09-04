@@ -1,7 +1,11 @@
 use crate::chunk::Chunk;
 use crate::strings::IString;
 use crate::value::Value;
-use std::time::{self, SystemTime};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    time::{self, SystemTime},
+};
 
 #[allow(dead_code)]
 #[derive(Default, PartialEq, Eq)]
@@ -76,7 +80,7 @@ pub fn clock(_args: &[Value]) -> Value {
 
 pub struct Closure {
     pub ifunction: IObject,
-    pub upvalues: Vec<UpValue>,
+    pub upvalues: Vec<Rc<RefCell<UpValue>>>,
 }
 
 impl Closure {
@@ -88,13 +92,19 @@ impl Closure {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct UpValue {
     pub location: usize,
+    pub next: Option<Rc<RefCell<UpValue>>>,
+    pub closed: Option<Value>,
 }
 
 impl UpValue {
     pub fn new(location: usize) -> Self {
-        Self { location }
+        Self {
+            location,
+            next: None,
+            closed: None,
+        }
     }
 }

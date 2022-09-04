@@ -9,11 +9,16 @@ use crate::value::Value;
 struct Local<'src> {
     name: Token<'src>,
     depth: i32,
+    is_captured: bool,
 }
 
 impl<'src> Local<'src> {
-    fn new(name: Token<'src>, depth: i32) -> Self {
-        Local { name, depth }
+    fn new(name: Token<'src>, depth: i32, is_captured: bool) -> Self {
+        Local {
+            name,
+            depth,
+            is_captured,
+        }
     }
 }
 
@@ -30,7 +35,7 @@ impl<'src> Compiler<'src> {
     const MAX_LOCAL: usize = std::u8::MAX as usize + 1;
     fn new(function_name: Option<IString>, function_type: FunctionType) -> Self {
         let mut locals = Vec::with_capacity(Compiler::MAX_LOCAL);
-        locals.push(Local::new(Token::default(), 0));
+        locals.push(Local::new(Token::default(), 0, false));
         Compiler {
             enclosing: None,
             function: Function::new(function_name),
@@ -75,6 +80,7 @@ impl<'src> Compiler<'src> {
             e.resolve_local(name)
                 .map(|result| {
                     let index = result?;
+                    e.locals[index as usize].is_captured = true;
                     Compiler::add_upvalue(&mut self.function.upvalues, index, true)
                 })
                 .or_else(|| {
@@ -394,7 +400,7 @@ impl<'src, 'i> Parser<'src, 'i> {
             self.error("Too many local variables in function.");
             return;
         }
-        let local = Local::new(name, -1);
+        let local = Local::new(name, -1, false);
         self.compiler.locals.push(local);
     }
 
@@ -610,10 +616,17 @@ impl<'src, 'i> Parser<'src, 'i> {
     fn end_scope(&mut self) {
         self.compiler.scope_depth -= 1;
 
-        while !self.compiler.locals.is_empty()
-            && self.compiler.locals.last().unwrap().depth > self.compiler.scope_depth
+        while let Some(local) = self
+            .compiler
+            .locals
+            .last()
+            .filter(|local| local.depth > self.compiler.scope_depth)
         {
-            self.emit(OpCode::Pop);
+            if local.is_captured {
+                self.emit(OpCode::CloseUpValue);
+            } else {
+                self.emit(OpCode::Pop);
+            }
             self.compiler.locals.pop();
         }
     }

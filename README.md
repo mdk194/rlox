@@ -2,7 +2,7 @@
 
 I'm learning Rust by implementing a bytecode vm for the clox language in the book [Crafting Interpreters](https://craftinginterpreters.com/).
 
-WIP: just finished chapter 24 of the book.
+WIP: just finished chapter 25 of the book.
 
 ```
 $ cat fib.lox
@@ -24,7 +24,6 @@ $ time cargo run --release --quiet fib.lox
 ```
 
 TODO:
-- 25: closure
 - 26: garbage collection
 - 27: classes and instances
 - 28: methods and initializers
