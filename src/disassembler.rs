@@ -1,15 +1,15 @@
 use crate::vm::VM;
 #[allow(unused_imports)]
-use crate::{Chunk, OpCode, value::Value};
+use crate::{value::Value, Chunk, OpCode};
 
 pub struct Disassembler<'a> {
     chunk: &'a Chunk,
-    vm: &'a VM<'a>,
+    vm: &'a VM,
 }
 
 #[allow(dead_code)]
 impl<'a> Disassembler<'a> {
-    pub fn new(chunk: &'a Chunk, vm: &'a VM<'a>) -> Self {
+    pub fn new(chunk: &'a Chunk, vm: &'a VM) -> Self {
         Disassembler { chunk, vm }
     }
 

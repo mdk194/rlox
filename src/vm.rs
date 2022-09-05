@@ -1,25 +1,25 @@
-use std::{cell::RefCell, rc::Rc};
-
 use rustc_hash::FxHashMap;
-use typed_arena::Arena;
-
-use crate::{
-    object::{clock, Closure, FnUpValue, Function, IObject, NativeFn, Objects, UpValue},
-    strings::{IString, Interner},
-};
 
 #[allow(unused_imports)]
-use crate::{compiler::Parser, disassembler::Disassembler, value::Value, Chunk, OpCode};
+use crate::{
+    cast,
+    compiler::Parser,
+    disassembler::Disassembler,
+    memory::{Heap, HeapId},
+    object::{clock, Closure, FnUpValue, Function, NativeFn, ObjectData, UpValue},
+    value::Value,
+    Chunk, OpCode,
+};
 
 struct CallFrame {
-    iclosure: IObject,
-    ifunction: IObject,
+    iclosure: HeapId,
+    ifunction: HeapId,
     ip: usize,
     slot: usize,
 }
 
 impl CallFrame {
-    fn new(iclosure: IObject, ifunction: IObject, slot: usize) -> Self {
+    fn new(iclosure: HeapId, ifunction: HeapId, slot: usize) -> Self {
         Self {
             iclosure,
             ifunction,
@@ -29,13 +29,12 @@ impl CallFrame {
     }
 }
 
-pub struct VM<'i> {
+pub struct VM {
     frames: Vec<CallFrame>,
-    functions: Objects<Function>,
-    closures: Objects<Closure>,
     stack: Vec<Value>,
-    strings: Interner<'i>,
-    globals: FxHashMap<IString, Value>,
+    heap: Heap,
+    globals: FxHashMap<HeapId, Value>,
+    open_upvalue: Option<HeapId>,
 }
 
 pub enum VMError {
@@ -45,25 +44,24 @@ pub enum VMError {
 
 pub type InterpretResult = Result<(), VMError>;
 
-impl<'src, 'i> VM<'i> {
+impl VM {
     const FRAME_MAX: usize = 64;
     const STACK_MAX: usize = VM::FRAME_MAX * (std::u8::MAX as usize + 1);
 
-    pub fn new(arena: &'i Arena<u8>) -> Self {
+    pub fn new(heap: Heap) -> Self {
         let mut vm = VM {
             frames: Vec::with_capacity(VM::FRAME_MAX),
-            functions: Objects::new(),
-            closures: Objects::new(),
             stack: Vec::with_capacity(VM::STACK_MAX),
-            strings: Interner::new(arena),
+            heap,
             globals: FxHashMap::default(),
+            open_upvalue: None,
         };
         vm.define_native("clock", clock);
         vm
     }
 
     fn define_native(&mut self, name: &str, f: NativeFn) {
-        let istring = self.strings.intern(name);
+        let istring = self.heap.intern(name);
         self.globals.insert(istring, Value::NativeFunction(f));
     }
 
@@ -77,24 +75,24 @@ impl<'src, 'i> VM<'i> {
 
     fn current_closure(&self) -> &Closure {
         let iclosure = self.current_frame().iclosure;
-        self.closures.lookup(iclosure)
+        cast!(self.heap.lookup(iclosure), Closure)
     }
 
     fn current_chunk(&self) -> &Chunk {
         let ifunction = self.current_frame().ifunction;
-        let f = self.functions.lookup(ifunction);
+        let f = cast!(self.heap.lookup(ifunction), Function);
         &f.chunk
     }
 
-    pub fn interpret(&'src mut self, source: &'src str) -> InterpretResult {
-        let p = Parser::new(source, &mut self.strings, &mut self.functions);
+    pub fn interpret(&mut self, source: &str) -> InterpretResult {
+        let p = Parser::new(source, &mut self.heap);
 
         match p.compile() {
             None => Err(VMError::CompileError),
             Some(f) => {
-                let ifunction = self.functions.add(f);
+                let ifunction = self.heap.alloc(ObjectData::Function(f));
                 let closure = Closure::new(ifunction);
-                let iclosure = self.closures.add(closure);
+                let iclosure = self.heap.alloc(ObjectData::Closure(closure));
                 self.stack.push(Value::Closure(iclosure));
                 self.call(iclosure, 0);
                 self.run()
@@ -124,26 +122,26 @@ impl<'src, 'i> VM<'i> {
         chunk.read_constant(index)
     }
 
-    fn read_string(&mut self) -> IString {
+    fn read_string(&mut self) -> HeapId {
         let index = self.read_byte();
         let chunk = self.current_chunk();
         chunk.read_string(index)
     }
 
-    pub fn peek(&self, distance: usize) -> Option<&Value> {
-        self.stack.get(self.stack.len() - 1 - distance)
+    pub fn peek(&self, distance: usize) -> Value {
+        self.stack[self.stack.len() - 1 - distance]
     }
 
     pub fn runtime_error(&mut self, msg: &str) {
         eprintln!("{}", msg);
         self.frames.iter().rev().for_each(|frame| {
-            let closure = self.closures.lookup(frame.iclosure);
-            let f = self.functions.lookup(closure.ifunction);
+            let closure = cast!(self.heap.lookup(frame.iclosure), Closure);
+            let f = cast!(self.heap.lookup(closure.ifunction), Function);
             let line = frame.ip - 1;
 
             match f.name {
                 Some(istring) => {
-                    let function_name = self.strings.lookup(istring);
+                    let function_name = cast!(self.heap.lookup(istring), String);
                     eprintln!("[line {}] in {}()", f.chunk.lines[line], function_name);
                 }
                 None => eprintln!("[line {}] in script", f.chunk.lines[line]),
@@ -168,9 +166,9 @@ impl<'src, 'i> VM<'i> {
         }
     }
 
-    fn call(&mut self, iclosure: IObject, arg_count: usize) -> bool {
-        let closure = self.closures.lookup(iclosure);
-        let f = self.functions.lookup(closure.ifunction);
+    fn call(&mut self, iclosure: HeapId, arg_count: usize) -> bool {
+        let closure = cast!(self.heap.lookup(iclosure), Closure);
+        let f = cast!(self.heap.lookup(closure.ifunction), Function);
 
         if arg_count != f.arity {
             self.runtime_error(
@@ -190,56 +188,51 @@ impl<'src, 'i> VM<'i> {
         true
     }
 
-    fn capture_upvalue(
-        &self,
-        open_upvalue: &mut Option<Rc<RefCell<UpValue>>>,
-        location: usize,
-    ) -> Rc<RefCell<UpValue>> {
+    fn capture_upvalue(&mut self, location: usize) -> HeapId {
         let mut prev_upvalue = None;
-        let mut upvalue = open_upvalue.clone();
+        let mut upvalue = self.open_upvalue;
 
-        while let Some(value) = upvalue
-            .clone()
-            .filter(|upvalue| upvalue.borrow().location > location)
+        while let Some(value) =
+            upvalue.filter(|upvalue| cast!(self.heap.lookup(*upvalue), UpValue).location > location)
         {
-            upvalue = value.borrow().next.clone();
+            upvalue = cast!(self.heap.lookup(value), UpValue).next;
             prev_upvalue = Some(value);
         }
 
         if let Some(value) = upvalue
-            .as_ref()
-            .filter(|upvalue| upvalue.borrow().location == location)
+            .filter(|upvalue| cast!(self.heap.lookup(*upvalue), UpValue).location == location)
         {
-            return value.clone();
+            return value;
         }
 
         let mut created_upvalue = UpValue::new(location);
         created_upvalue.next = upvalue;
-        let created_upvalue = Rc::new(RefCell::new(created_upvalue));
+        let iupvalue = self.heap.alloc(ObjectData::UpValue(created_upvalue));
 
         if let Some(value) = prev_upvalue {
-            value.borrow_mut().next = Some(created_upvalue.clone());
+            cast!(self.heap.lookup_mut(value), UpValue).next = Some(iupvalue);
         } else {
-            *open_upvalue = Some(created_upvalue.clone());
+            self.open_upvalue = Some(iupvalue);
         }
 
-        created_upvalue
+        iupvalue
     }
 
-    fn close_upvalues(&mut self, open_upvalue: &mut Option<Rc<RefCell<UpValue>>>, last: usize) {
-        while let Some(upvalue) = open_upvalue
-            .clone()
-            .filter(|upvalue| upvalue.borrow().location >= last)
+    fn close_upvalues(&mut self, last: usize) {
+        while let Some(upvalue) = self
+            .open_upvalue
+            .filter(|upvalue| cast!(self.heap.lookup(*upvalue), UpValue).location >= last)
         {
-            let value = self.stack[upvalue.borrow().location];
-            upvalue.borrow_mut().closed = Some(value);
-            *open_upvalue = upvalue.borrow_mut().next.take();
+            let mut upvalue = cast!(self.heap.lookup_mut(upvalue), UpValue);
+            let value = self.stack[upvalue.location];
+            upvalue.closed = Some(value);
+            self.open_upvalue = upvalue.next.take();
         }
     }
 
     #[allow(dead_code)]
-    pub fn upvalues(&self, ifunction: IObject) -> &Vec<FnUpValue> {
-        &self.functions.lookup(ifunction).upvalues
+    pub fn upvalues(&self, ifunction: HeapId) -> &Vec<FnUpValue> {
+        &cast!(self.heap.lookup(ifunction), Function).upvalues
     }
 
     pub fn print_value(&self, v: Value) -> String {
@@ -247,25 +240,25 @@ impl<'src, 'i> VM<'i> {
             Value::Nil => "nil".to_owned(),
             Value::Bool(v) => format!("{}", v),
             Value::Number(v) => format!("{}", v),
-            Value::String(i) => self.strings.lookup(i).to_owned(),
+            Value::String(i) => cast!(self.heap.lookup(i), String).to_owned(),
             Value::Function(i) => {
-                if let Some(fn_name) = self.functions.lookup(i).name {
-                    return format!("<fn {}>", self.strings.lookup(fn_name));
+                if let Some(fn_name) = cast!(self.heap.lookup(i), Function).name {
+                    return format!("<fn {}>", cast!(self.heap.lookup(fn_name), String));
                 }
                 "<script>".to_owned()
             }
             Value::NativeFunction(_) => "<native fn>".to_owned(),
             Value::Closure(i) => {
-                let ifunction = self.closures.lookup(i).ifunction;
-                if let Some(fn_name) = self.functions.lookup(ifunction).name {
-                    return format!("<fn {}>", self.strings.lookup(fn_name));
+                let ifunction = cast!(self.heap.lookup(i), Closure).ifunction;
+                if let Some(fn_name) = cast!(self.heap.lookup(ifunction), Function).name {
+                    return format!("<fn {}>", cast!(self.heap.lookup(fn_name), String));
                 }
                 "<closure>".to_owned()
             }
         }
     }
 
-    pub fn run(&'src mut self) -> InterpretResult {
+    pub fn run(&mut self) -> InterpretResult {
         macro_rules! binary_op {
             ($type:ident, $op:tt) => {{
                 let b: Value = self.stack.pop().unwrap();
@@ -275,10 +268,10 @@ impl<'src, 'i> VM<'i> {
                         self.stack.push(Value::$type(a $op b));
                     },
                     (Value::String(a), Value::String(b)) => {
-                        let a_str = self.strings.lookup(a);
-                        let b_str = self.strings.lookup(b);
+                        let a_str = cast!(self.heap.lookup(a), String);
+                        let b_str = cast!(self.heap.lookup(b), String);
                         let r = format!("{}{}", a_str, b_str);
-                        let r = self.strings.intern(&r);
+                        let r = self.heap.intern(&r);
                         self.stack.push(Value::String(r));
                     },
                     _ => {
@@ -289,7 +282,6 @@ impl<'src, 'i> VM<'i> {
             }};
         }
 
-        let mut open_upvalue = None;
         loop {
             #[cfg(debug_assertions)]
             {
@@ -307,7 +299,7 @@ impl<'src, 'i> VM<'i> {
                 OpCode::Return => {
                     let result = self.stack.pop().unwrap();
                     let frame = self.frames.pop().unwrap();
-                    self.close_upvalues(&mut open_upvalue, frame.slot);
+                    self.close_upvalues(frame.slot);
 
                     if self.frames.is_empty() {
                         return Ok(());
@@ -321,7 +313,7 @@ impl<'src, 'i> VM<'i> {
                     self.stack.push(c);
                 }
                 OpCode::Negate => {
-                    if let Some(&Value::Number(v)) = self.peek(0) {
+                    if let Value::Number(v) = self.peek(0) {
                         self.stack.pop();
                         self.stack.push(Value::Number(-v));
                     } else {
@@ -365,7 +357,7 @@ impl<'src, 'i> VM<'i> {
                     match self.globals.get(&istring) {
                         Some(&value) => self.stack.push(value),
                         None => {
-                            let name = self.strings.lookup(istring);
+                            let name = cast!(self.heap.lookup(istring), String);
                             let msg = format!("Undefined variable '{}'.", name);
                             self.runtime_error(&msg);
                             return Err(VMError::RuntimeError);
@@ -374,10 +366,10 @@ impl<'src, 'i> VM<'i> {
                 }
                 OpCode::SetGlobal => {
                     let istring = self.read_string();
-                    let value = self.peek(0).unwrap();
-                    if self.globals.insert(istring, *value).is_none() {
+                    let value = self.peek(0);
+                    if self.globals.insert(istring, value).is_none() {
                         self.globals.remove(&istring);
-                        let name = self.strings.lookup(istring);
+                        let name = cast!(self.heap.lookup(istring), String);
                         let msg = format!("Undefined variable '{}'.", name);
                         self.runtime_error(&msg);
                         return Err(VMError::RuntimeError);
@@ -390,12 +382,12 @@ impl<'src, 'i> VM<'i> {
                 }
                 OpCode::SetLocal => {
                     let slot = self.read_byte() as usize + self.current_frame().slot;
-                    let value = *self.peek(0).unwrap();
+                    let value = self.peek(0);
                     self.stack[slot as usize] = value;
                 }
                 OpCode::JumpIfFalse => {
                     let offset = self.read_short();
-                    if self.peek(0).unwrap().is_falsey() {
+                    if self.peek(0).is_falsey() {
                         self.current_frame_mut().ip += offset as usize;
                     }
                 }
@@ -409,7 +401,7 @@ impl<'src, 'i> VM<'i> {
                 }
                 OpCode::Call => {
                     let arg_count = self.read_byte();
-                    let callee = *self.peek(arg_count as usize).unwrap();
+                    let callee = self.peek(arg_count as usize);
                     if !self.call_value(callee, arg_count) {
                         return Err(VMError::RuntimeError);
                     }
@@ -419,26 +411,27 @@ impl<'src, 'i> VM<'i> {
 
                     if let Value::Function(ifunction) = constant {
                         let mut closure = Closure::new(ifunction);
-                        let upvalues = &self.functions.lookup(ifunction).upvalues;
+                        let upvalues = cast!(self.heap.lookup(ifunction), Function).upvalues.len();
 
-                        upvalues.iter().for_each(|upvalue| {
+                        for i in 0..upvalues {
+                            let upvalue = &cast!(self.heap.lookup(ifunction), Function).upvalues[i];
                             let upvalue = if upvalue.is_local {
                                 let location = self.current_frame().slot + upvalue.index as usize;
-                                self.capture_upvalue(&mut open_upvalue, location)
+                                self.capture_upvalue(location)
                             } else {
-                                self.current_closure().upvalues[upvalue.index as usize].clone()
+                                self.current_closure().upvalues[upvalue.index as usize]
                             };
                             closure.upvalues.push(upvalue);
-                        });
-                        let iclosure = self.closures.add(closure);
+                        }
+                        let iclosure = self.heap.alloc(ObjectData::Closure(closure));
                         self.stack.push(Value::Closure(iclosure));
                     }
                 }
                 OpCode::GetUpValue => {
                     let slot = self.read_byte();
                     let value = {
-                        let closure = self.current_closure();
-                        let upvalue = closure.upvalues[slot as usize].borrow();
+                        let iupvalue = self.current_closure().upvalues[slot as usize];
+                        let upvalue = cast!(self.heap.lookup_mut(iupvalue), UpValue);
                         match upvalue.closed {
                             Some(v) => v,
                             None => self.stack[upvalue.location],
@@ -448,10 +441,9 @@ impl<'src, 'i> VM<'i> {
                 }
                 OpCode::SetUpValue => {
                     let slot = self.read_byte();
-                    let iclosure = self.current_frame().iclosure;
-                    let closure = self.closures.lookup(iclosure);
-                    let mut upvalue = closure.upvalues[slot as usize].borrow_mut();
-                    let value = *self.peek(0).unwrap();
+                    let value = self.peek(0);
+                    let iupvalue = self.current_closure().upvalues[slot as usize];
+                    let mut upvalue = cast!(self.heap.lookup_mut(iupvalue), UpValue);
                     if upvalue.closed.is_none() {
                         self.stack[upvalue.location] = value
                     } else {
@@ -459,7 +451,7 @@ impl<'src, 'i> VM<'i> {
                     }
                 }
                 OpCode::CloseUpValue => {
-                    self.close_upvalues(&mut open_upvalue, self.stack.len() - 1);
+                    self.close_upvalues(self.stack.len() - 1);
                     self.stack.pop();
                 }
             }

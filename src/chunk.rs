@@ -1,4 +1,4 @@
-use crate::strings::IString;
+use crate::memory::HeapId;
 use crate::value::Value;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
@@ -48,7 +48,7 @@ impl Chunk {
         self.constants[index as usize]
     }
 
-    pub fn read_string(&self, index: u8) -> IString {
+    pub fn read_string(&self, index: u8) -> HeapId {
         if let Value::String(i) = self.read_constant(index) {
             i
         } else {

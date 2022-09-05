@@ -1,11 +1,29 @@
 use crate::chunk::Chunk;
-use crate::strings::IString;
+use crate::memory::HeapId;
 use crate::value::Value;
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    time::{self, SystemTime},
-};
+use std::time::{self, SystemTime};
+
+#[allow(dead_code)]
+pub struct Object {
+    pub data: ObjectData,
+    is_marked: bool,
+}
+
+impl Object {
+    pub fn new(data: ObjectData) -> Self {
+        Self {
+            data,
+            is_marked: false,
+        }
+    }
+}
+
+pub enum ObjectData {
+    String(String),
+    Function(Function),
+    Closure(Closure),
+    UpValue(UpValue),
+}
 
 #[allow(dead_code)]
 #[derive(Default, PartialEq, Eq)]
@@ -33,38 +51,17 @@ pub struct Function {
     pub arity: usize,
     pub upvalues: Vec<FnUpValue>,
     pub chunk: Chunk,
-    pub name: Option<IString>,
+    pub name: Option<HeapId>,
 }
 
 impl Function {
-    pub fn new(name: Option<IString>) -> Self {
+    pub fn new(name: Option<HeapId>) -> Self {
         Self {
             arity: 0,
             upvalues: Vec::new(),
             chunk: Chunk::default(),
             name,
         }
-    }
-}
-
-pub type IObject = usize;
-
-pub struct Objects<O> {
-    v: Vec<O>,
-}
-
-impl<O> Objects<O> {
-    pub fn new() -> Self {
-        Self { v: Vec::new() }
-    }
-
-    pub fn lookup(&self, id: IObject) -> &O {
-        &self.v[id]
-    }
-
-    pub fn add(&mut self, o: O) -> IObject {
-        self.v.push(o);
-        self.v.len() - 1
     }
 }
 
@@ -79,12 +76,12 @@ pub fn clock(_args: &[Value]) -> Value {
 }
 
 pub struct Closure {
-    pub ifunction: IObject,
-    pub upvalues: Vec<Rc<RefCell<UpValue>>>,
+    pub ifunction: HeapId,
+    pub upvalues: Vec<HeapId>,
 }
 
 impl Closure {
-    pub fn new(ifunction: IObject) -> Self {
+    pub fn new(ifunction: HeapId) -> Self {
         Self {
             ifunction,
             upvalues: Vec::new(),
@@ -95,7 +92,7 @@ impl Closure {
 #[derive(Clone)]
 pub struct UpValue {
     pub location: usize,
-    pub next: Option<Rc<RefCell<UpValue>>>,
+    pub next: Option<HeapId>,
     pub closed: Option<Value>,
 }
 
@@ -107,4 +104,15 @@ impl UpValue {
             closed: None,
         }
     }
+}
+
+#[macro_export]
+macro_rules! cast {
+    ($target: expr, $type:ident) => {
+        if let ObjectData::$type(a) = $target {
+            a
+        } else {
+            panic!("unable to cast to {}", stringify!($type));
+        }
+    };
 }

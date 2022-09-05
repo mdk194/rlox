@@ -1,9 +1,9 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use crate::chunk::{Chunk, OpCode};
-use crate::object::{FnUpValue, Function, FunctionType, Objects};
+use crate::memory::{Heap, HeapId};
+use crate::object::{FnUpValue, Function, FunctionType, ObjectData};
 use crate::scanner::{Scanner, Token, TokenType};
-use crate::strings::{IString, Interner};
 use crate::value::Value;
 
 struct Local<'src> {
@@ -33,7 +33,7 @@ struct Compiler<'src> {
 
 impl<'src> Compiler<'src> {
     const MAX_LOCAL: usize = std::u8::MAX as usize + 1;
-    fn new(function_name: Option<IString>, function_type: FunctionType) -> Self {
+    fn new(function_name: Option<HeapId>, function_type: FunctionType) -> Self {
         let mut locals = Vec::with_capacity(Compiler::MAX_LOCAL);
         locals.push(Local::new(Token::default(), 0, false));
         Compiler {
@@ -114,12 +114,11 @@ impl<'src> Compiler<'src> {
     }
 }
 
-pub struct Parser<'src, 'i> {
-    rules: Vec<(TokenType, ParseRule<'src, 'i>)>,
-    strings: &'src mut Interner<'i>,
+pub struct Parser<'src> {
+    rules: Vec<(TokenType, ParseRule<'src>)>,
+    heap: &'src mut Heap,
     scanner: Scanner<'src>,
     compiler: Compiler<'src>,
-    functions: &'src mut Objects<Function>,
     current: Token<'src>,
     previous: Token<'src>,
     has_error: bool,
@@ -144,16 +143,16 @@ enum Precedence {
     Primary    = 10,
 }
 
-type ParseFn<'src, 'i> = fn(&mut Parser<'src, 'i>, bool) -> ();
-struct ParseRule<'src, 'i> {
-    prefix: Option<ParseFn<'src, 'i>>,
-    infix: Option<ParseFn<'src, 'i>>,
+type ParseFn<'src> = fn(&mut Parser<'src>, bool) -> ();
+struct ParseRule<'src> {
+    prefix: Option<ParseFn<'src>>,
+    infix: Option<ParseFn<'src>>,
     precedence: Precedence,
 }
 
-impl<'src, 'i> Parser<'src, 'i> {
+impl<'src> Parser<'src> {
     #[rustfmt::skip]
-    pub fn new(source: &'src str, strings: &'src mut Interner<'i>, functions: &'src mut Objects<Function>) -> Self {
+    pub fn new(source: &'src str, heap: &'src mut Heap) -> Self {
         let mut rules = Vec::new();
         let mut r = |t, prefix, infix, precedence| {
             rules.push((t, ParseRule{prefix, infix, precedence}));
@@ -202,10 +201,9 @@ impl<'src, 'i> Parser<'src, 'i> {
 
         Parser {
             rules,
-            strings,
+            heap,
             scanner: Scanner::new(source),
             compiler: Compiler::new(None, FunctionType::Script),
-            functions,
             current: Token::default(),
             previous: Token::default(),
             has_error: false,
@@ -272,7 +270,7 @@ impl<'src, 'i> Parser<'src, 'i> {
     }
 
     fn push_compiler(&mut self, ftype: FunctionType) {
-        let ifunction = self.strings.intern(self.previous.lexeme);
+        let ifunction = self.heap.intern(self.previous.lexeme);
         let c = Compiler::new(Some(ifunction), ftype);
         let enclosing = std::mem::replace(&mut self.compiler, c);
         self.compiler.enclosing = Some(Box::new(enclosing));
@@ -311,7 +309,7 @@ impl<'src, 'i> Parser<'src, 'i> {
         self.block();
 
         let f = self.pop_compiler();
-        let ifunction = self.functions.add(f);
+        let ifunction = self.heap.alloc(ObjectData::Function(f));
         let index = self.make_constant(Value::Function(ifunction));
         self.emit_bytes(OpCode::Closure as u8, index as u8);
     }
@@ -405,7 +403,7 @@ impl<'src, 'i> Parser<'src, 'i> {
     }
 
     fn identifier_constant(&mut self, t: Token) -> u8 {
-        let identifier = self.strings.intern(t.lexeme);
+        let identifier = self.heap.intern(t.lexeme);
         self.make_constant(Value::String(identifier))
     }
 
@@ -781,7 +779,7 @@ impl<'src, 'i> Parser<'src, 'i> {
     fn string(&mut self, _can_assign: bool) {
         let lexeme = self.previous.lexeme;
         let value = &lexeme[1..(lexeme.len() - 1)];
-        let istring = self.strings.intern(value);
+        let istring = self.heap.intern(value);
         self.emit_constant(Value::String(istring))
     }
 
@@ -798,7 +796,7 @@ impl<'src, 'i> Parser<'src, 'i> {
         }
     }
 
-    fn get_rule(&self, ttype: TokenType) -> &ParseRule<'src, 'i> {
+    fn get_rule(&self, ttype: TokenType) -> &ParseRule<'src> {
         &self.rules[ttype as usize].1
     }
 

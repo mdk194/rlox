@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 num_enum = "0.5.7"
 rustc-hash = "1.1.0"
-typed-arena = "2.0.1"
 
 [profile.release]
 debug = true
+panic = "abort"

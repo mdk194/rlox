@@ -1,15 +1,15 @@
-use crate::object::{IObject, NativeFn};
-use crate::strings::IString;
+use crate::memory::HeapId;
+use crate::object::NativeFn;
 
 #[derive(Clone, Copy)]
 pub enum Value {
     Bool(bool),
     Nil,
     Number(f64),
-    String(IString),
-    Function(IObject),
+    String(HeapId),
+    Function(HeapId),
     NativeFunction(NativeFn),
-    Closure(IObject),
+    Closure(HeapId),
 }
 
 impl Value {
